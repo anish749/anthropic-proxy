@@ -2,23 +2,25 @@ package proxy
 
 import (
 	"bytes"
-	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"strings"
 )
 
 const targetBase = "https://api.anthropic.com"
 
 type Proxy struct {
-	client *http.Client
+	client     *http.Client
+	fileLogger *FileLogger
 }
 
 func New() *Proxy {
 	return &Proxy{
 		client: &http.Client{},
+		fileLogger: NewFileLogger("requests",
+			ToolsExtractor{},
+			MessagesExtractor{},
+		),
 	}
 }
 
@@ -39,9 +41,6 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		r.Body.Close()
 	}
-
-	// Log request
-	logRequest(r, targetURL, reqBody)
 
 	// Build outgoing request
 	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, bytes.NewReader(reqBody))
@@ -73,8 +72,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Log response
-	logResponse(resp, respBody)
+	// Log request parts to files for Anthropic Messages API calls
+	if r.Method == http.MethodPost && r.URL.Path == "/v1/messages" {
+		if reqID := resp.Header.Get("Request-Id"); reqID != "" {
+			p.fileLogger.Log(reqID, reqBody)
+		}
+	}
 
 	// Copy response headers back to client
 	for key, vals := range resp.Header {
@@ -84,51 +87,4 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(resp.StatusCode)
 	w.Write(respBody)
-}
-
-func logRequest(r *http.Request, targetURL string, body []byte) {
-	fmt.Println(strings.Repeat("─", 60))
-	fmt.Printf("► REQUEST  %s %s\n", r.Method, targetURL)
-	fmt.Println(strings.Repeat("─", 60))
-
-	fmt.Println("Headers:")
-	for key, vals := range r.Header {
-		for _, val := range vals {
-			fmt.Printf("  %s: %s\n", key, val)
-		}
-	}
-
-	if len(body) > 0 {
-		fmt.Println("\nBody:")
-		printJSON(body)
-	}
-	fmt.Println()
-}
-
-func logResponse(resp *http.Response, body []byte) {
-	fmt.Println(strings.Repeat("─", 60))
-	fmt.Printf("◄ RESPONSE %d %s\n", resp.StatusCode, resp.Status)
-	fmt.Println(strings.Repeat("─", 60))
-
-	fmt.Println("Headers:")
-	for key, vals := range resp.Header {
-		for _, val := range vals {
-			fmt.Printf("  %s: %s\n", key, val)
-		}
-	}
-
-	if len(body) > 0 {
-		fmt.Println("\nBody:")
-		printJSON(body)
-	}
-	fmt.Println()
-}
-
-func printJSON(data []byte) {
-	var buf bytes.Buffer
-	if json.Indent(&buf, data, "  ", "  ") == nil {
-		fmt.Printf("  %s\n", buf.String())
-	} else {
-		fmt.Printf("  %s\n", string(data))
-	}
 }

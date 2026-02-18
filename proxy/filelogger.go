@@ -7,20 +7,22 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type FileLogger struct {
-	dir        string
-	extractors []Extractor
+	dir            string
+	reqExtractors  []Extractor
+	respExtractors []Extractor
 }
 
-func NewFileLogger(dir string, extractors ...Extractor) *FileLogger {
-	return &FileLogger{dir: dir, extractors: extractors}
+func NewFileLogger(dir string, reqExtractors []Extractor, respExtractors []Extractor) *FileLogger {
+	return &FileLogger{dir: dir, reqExtractors: reqExtractors, respExtractors: respExtractors}
 }
 
-func (fl *FileLogger) Log(requestID string, body []byte) {
-	var parsed map[string]json.RawMessage
-	if err := json.Unmarshal(body, &parsed); err != nil {
+func (fl *FileLogger) Log(requestID string, reqBody, respBody []byte) {
+	var parsedReq map[string]json.RawMessage
+	if err := json.Unmarshal(reqBody, &parsedReq); err != nil {
 		return
 	}
 
@@ -29,27 +31,64 @@ func (fl *FileLogger) Log(requestID string, body []byte) {
 		return
 	}
 
-	model := extractModel(parsed)
+	model := extractModel(parsedReq)
+	ts := time.Now().UTC().Format("20060102-150405")
+	prefix := fmt.Sprintf("%s-%s-%s", ts, requestID, model)
 
-	for _, ext := range fl.extractors {
+	fl.writeExtracted(prefix, parsedReq, fl.reqExtractors)
+	fl.writeExtractedRaw(prefix, respBody, fl.respExtractors)
+
+	fmt.Printf("logged request %s (model=%s)\n", requestID, model)
+}
+
+func (fl *FileLogger) writeExtracted(prefix string, parsed map[string]json.RawMessage, extractors []Extractor) {
+	for _, ext := range extractors {
 		raw, ok := ext.Extract(parsed)
 		if !ok {
 			continue
 		}
+		fl.writeFile(prefix, ext.Name(), raw)
+	}
+}
 
-		var buf bytes.Buffer
-		if err := json.Indent(&buf, raw, "", "  "); err != nil {
+func (fl *FileLogger) writeExtractedRaw(prefix string, body []byte, extractors []Extractor) {
+	// Try as plain JSON first
+	var parsed map[string]json.RawMessage
+	jsonOK := json.Unmarshal(body, &parsed) == nil
+
+	for _, ext := range extractors {
+		var raw json.RawMessage
+		var ok bool
+
+		if jsonOK {
+			raw, ok = ext.Extract(parsed)
+		}
+
+		// Fall back to RawExtractor if JSON parsing failed or key wasn't found
+		if !ok {
+			if re, isRaw := ext.(RawExtractor); isRaw {
+				raw, ok = re.ExtractFromRaw(body)
+			}
+		}
+
+		if !ok {
 			continue
 		}
+		fl.writeFile(prefix, ext.Name(), raw)
+	}
+}
 
-		filename := fmt.Sprintf("%s-%s-%s.json", requestID, model, ext.Name())
-		path := filepath.Join(fl.dir, filename)
-		if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
-			log.Printf("failed to write %s: %v", path, err)
-		}
+func (fl *FileLogger) writeFile(prefix, name string, raw json.RawMessage) {
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, raw, "", "  "); err != nil {
+		return
 	}
 
-	fmt.Printf("logged request %s (model=%s)\n", requestID, model)
+	filename := fmt.Sprintf("%s-%s.json", prefix, name)
+	path := filepath.Join(fl.dir, filename)
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		log.Printf("failed to write %s: %v", path, err)
+	}
 }
 
 func extractModel(parsed map[string]json.RawMessage) string {

@@ -2,6 +2,8 @@ package proxy
 
 import "encoding/json"
 
+var _ Extractor = (*MessagesExtractor)(nil)
+
 type MessagesExtractor struct{}
 
 func (MessagesExtractor) Name() string { return "messages" }

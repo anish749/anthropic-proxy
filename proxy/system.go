@@ -2,6 +2,8 @@ package proxy
 
 import "encoding/json"
 
+var _ Extractor = (*SystemExtractor)(nil)
+
 type SystemExtractor struct{}
 
 func (SystemExtractor) Name() string { return "system" }

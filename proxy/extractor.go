@@ -8,3 +8,11 @@ type Extractor interface {
 	Name() string
 	Extract(body map[string]json.RawMessage) (json.RawMessage, bool)
 }
+
+// RawExtractor is an optional interface for extractors that can work
+// directly on raw response bytes (e.g. SSE streams) when standard
+// JSON parsing fails.
+type RawExtractor interface {
+	Extractor
+	ExtractFromRaw(body []byte) (json.RawMessage, bool)
+}

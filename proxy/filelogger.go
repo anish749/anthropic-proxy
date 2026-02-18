@@ -29,6 +29,8 @@ func (fl *FileLogger) Log(requestID string, body []byte) {
 		return
 	}
 
+	model := extractModel(parsed)
+
 	for _, ext := range fl.extractors {
 		raw, ok := ext.Extract(parsed)
 		if !ok {
@@ -40,10 +42,24 @@ func (fl *FileLogger) Log(requestID string, body []byte) {
 			continue
 		}
 
-		filename := fmt.Sprintf("%s-%s.json", requestID, ext.Name())
+		filename := fmt.Sprintf("%s-%s-%s.json", requestID, model, ext.Name())
 		path := filepath.Join(fl.dir, filename)
 		if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 			log.Printf("failed to write %s: %v", path, err)
 		}
 	}
+
+	fmt.Printf("logged request %s (model=%s)\n", requestID, model)
+}
+
+func extractModel(parsed map[string]json.RawMessage) string {
+	raw, ok := parsed["model"]
+	if !ok {
+		return "unknown"
+	}
+	var model string
+	if err := json.Unmarshal(raw, &model); err != nil {
+		return "unknown"
+	}
+	return model
 }

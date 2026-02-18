@@ -20,6 +20,7 @@ func New() *Proxy {
 		fileLogger: NewFileLogger("requests",
 			ToolsExtractor{},
 			MessagesExtractor{},
+			SystemExtractor{},
 		),
 	}
 }

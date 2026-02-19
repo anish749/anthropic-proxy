@@ -12,6 +12,7 @@ const targetBase = "https://api.anthropic.com"
 type Proxy struct {
 	client     *http.Client
 	fileLogger *FileLogger
+	rewriter   *Rewriter
 }
 
 func New() *Proxy {
@@ -21,6 +22,7 @@ func New() *Proxy {
 			[]Extractor{ToolsExtractor{}, MessagesExtractor{}, SystemExtractor{}},
 			[]Extractor{UsageExtractor{}},
 		),
+		rewriter: NewRewriter("prompts"),
 	}
 }
 
@@ -42,8 +44,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Body.Close()
 	}
 
+	// Rewrite system prompt if rules are configured
+	rewrittenBody := p.rewriter.Rewrite(reqBody)
+
 	// Build outgoing request
-	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, bytes.NewReader(reqBody))
+	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, bytes.NewReader(rewrittenBody))
 	if err != nil {
 		http.Error(w, "failed to create request", http.StatusInternalServerError)
 		return

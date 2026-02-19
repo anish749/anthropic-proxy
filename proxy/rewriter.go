@@ -12,9 +12,10 @@ import (
 )
 
 type findReplaceRule struct {
-	Block   int    `yaml:"block"`
-	Find    string `yaml:"find"`
-	Replace string `yaml:"replace"`
+	Block    int    `yaml:"block"`
+	Find     string `yaml:"find"`
+	Replace  string `yaml:"replace"`
+	Disabled bool   `yaml:"disabled"`
 }
 
 type Rewriter struct {
@@ -49,10 +50,17 @@ func NewRewriter(dir string) *Rewriter {
 		if err := yaml.Unmarshal(data, &rules); err != nil {
 			log.Printf("rewriter: failed to parse %s: %v", yamlPath, err)
 		} else {
+			loaded := 0
+			skipped := 0
 			for _, r := range rules {
+				if r.Disabled {
+					skipped++
+					continue
+				}
 				rw.findReplace[r.Block] = append(rw.findReplace[r.Block], r)
+				loaded++
 			}
-			log.Printf("rewriter: loaded %d find-replace rules from %s", len(rules), yamlPath)
+			log.Printf("rewriter: loaded %d find-replace rules from %s (%d disabled)", loaded, yamlPath, skipped)
 		}
 	}
 

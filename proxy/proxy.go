@@ -15,15 +15,18 @@ type Proxy struct {
 	rewriter   *Rewriter
 }
 
-func New() *Proxy {
-	return &Proxy{
-		client: &http.Client{},
-		fileLogger: NewFileLogger("requests",
-			[]Extractor{ToolsExtractor{}, MessagesExtractor{}, SystemExtractor{}},
-			[]Extractor{UsageExtractor{}},
-		),
+func New(logRequests bool) *Proxy {
+	p := &Proxy{
+		client:   &http.Client{},
 		rewriter: NewRewriter("prompts"),
 	}
+	if logRequests {
+		p.fileLogger = NewFileLogger("requests",
+			[]Extractor{ToolsExtractor{}, MessagesExtractor{}, SystemExtractor{}},
+			[]Extractor{UsageExtractor{}},
+		)
+	}
+	return p
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -78,7 +81,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Log request parts to files for Anthropic Messages API calls
-	if r.Method == http.MethodPost && r.URL.Path == "/v1/messages" {
+	if p.fileLogger != nil && r.Method == http.MethodPost && r.URL.Path == "/v1/messages" {
 		if reqID := resp.Header.Get("Request-Id"); reqID != "" {
 			p.fileLogger.Log(reqID, reqBody, respBody)
 		}

@@ -11,10 +11,11 @@ import (
 
 func main() {
 	port := flag.Int("port", 8080, "port to listen on")
+	logRequests := flag.Bool("log", false, "log requests to the requests/ directory")
 	flag.Parse()
 
 	addr := fmt.Sprintf(":%d", *port)
-	p := proxy.New()
+	p := proxy.New(*logRequests)
 
 	fmt.Printf("anthropic-proxy listening on http://localhost%s\n", addr)
 	fmt.Printf("forwarding to https://api.anthropic.com\n\n")

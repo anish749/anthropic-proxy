@@ -13,18 +13,31 @@ type Proxy struct {
 	client     *http.Client
 	fileLogger *FileLogger
 	rewriter   *Rewriter
+	credSwap   *CredSwapper
 }
 
-func New(logRequests bool) *Proxy {
+type Options struct {
+	LogRequests bool
+	SwapCreds   bool
+}
+
+func New(opts Options) *Proxy {
 	p := &Proxy{
 		client:   &http.Client{},
 		rewriter: NewRewriter("prompts"),
 	}
-	if logRequests {
+	if opts.LogRequests {
 		p.fileLogger = NewFileLogger("requests",
 			[]Extractor{ToolsExtractor{}, MessagesExtractor{}, SystemExtractor{}},
 			[]Extractor{UsageExtractor{}},
 		)
+	}
+	if opts.SwapCreds {
+		cs, err := NewCredSwapper()
+		if err != nil {
+			log.Fatalf("[credswap] %v", err)
+		}
+		p.credSwap = cs
 	}
 	return p
 }
@@ -61,6 +74,15 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for key, vals := range r.Header {
 		for _, val := range vals {
 			outReq.Header.Add(key, val)
+		}
+	}
+
+	// Swap credentials if enabled
+	if p.credSwap != nil {
+		if err := p.credSwap.SwapHeaders(outReq); err != nil {
+			log.Printf("[credswap] failed to swap credentials: %v", err)
+			http.Error(w, "credential swap failed", http.StatusInternalServerError)
+			return
 		}
 	}
 

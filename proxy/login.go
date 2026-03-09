@@ -10,9 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -33,38 +31,6 @@ type AuthData struct {
 	Access  string `json:"access"`
 	Refresh string `json:"refresh"`
 	Expires int64  `json:"expires"` // unix millis
-}
-
-func authDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".anthropic-proxy")
-}
-
-func authFilePath() string {
-	return filepath.Join(authDir(), "auth.json")
-}
-
-func loadAuth() (*AuthData, error) {
-	data, err := os.ReadFile(authFilePath())
-	if err != nil {
-		return nil, err
-	}
-	var auth AuthData
-	if err := json.Unmarshal(data, &auth); err != nil {
-		return nil, err
-	}
-	return &auth, nil
-}
-
-func saveAuth(auth *AuthData) error {
-	if err := os.MkdirAll(authDir(), 0700); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(auth, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(authFilePath(), data, 0600)
 }
 
 // generatePKCE creates a PKCE code_verifier and S256 code_challenge.
@@ -155,6 +121,8 @@ func refreshToken(refresh string) (*tokenResponse, error) {
 
 // RunLogin performs the interactive OAuth login flow.
 func RunLogin() error {
+	store := NewAuthStore()
+
 	verifier, challenge, err := generatePKCE()
 	if err != nil {
 		return fmt.Errorf("failed to generate PKCE: %w", err)
@@ -204,10 +172,10 @@ func RunLogin() error {
 		Expires: expiresAt,
 	}
 
-	if err := saveAuth(auth); err != nil {
+	if err := store.Save(auth); err != nil {
 		return fmt.Errorf("failed to save credentials: %w", err)
 	}
 
-	fmt.Printf("Logged in successfully. Credentials saved to %s\n", authFilePath())
+	fmt.Printf("Logged in successfully. Credentials saved to %s\n", store.Name())
 	return nil
 }

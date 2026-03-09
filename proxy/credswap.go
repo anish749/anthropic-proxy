@@ -25,23 +25,25 @@ func maskValue(v string) string {
 	return v[:6] + "..." + v[len(v)-4:]
 }
 
-// CredSwapper loads OAuth credentials from auth.json and swaps
+// CredSwapper loads OAuth credentials and swaps
 // the Authorization header on outgoing proxy requests.
 // It auto-refreshes expired tokens.
 type CredSwapper struct {
-	mu   sync.Mutex
-	auth *AuthData
+	mu    sync.Mutex
+	auth  *AuthData
+	store AuthStore
 }
 
-// NewCredSwapper loads credentials from ~/.anthropic-proxy/auth.json.
+// NewCredSwapper loads credentials from the platform credential store.
 // Returns an error if credentials are not found (user should run "login" first).
 func NewCredSwapper() (*CredSwapper, error) {
-	auth, err := loadAuth()
+	store := NewAuthStore()
+	auth, err := store.Load()
 	if err != nil {
 		return nil, fmt.Errorf("no credentials found — run 'login' first: %w", err)
 	}
-	log.Printf("[credswap] loaded OAuth token: %s", maskValue(auth.Access))
-	return &CredSwapper{auth: auth}, nil
+	log.Printf("[credswap] loaded OAuth token from %s: %s", store.Name(), maskValue(auth.Access))
+	return &CredSwapper{auth: auth, store: store}, nil
 }
 
 // ensureFresh checks if the token is expired and refreshes if needed.
@@ -63,7 +65,7 @@ func (cs *CredSwapper) ensureFresh() error {
 	cs.auth.Refresh = tok.RefreshToken
 	cs.auth.Expires = time.Now().UnixMilli() + (tok.ExpiresIn * 1000) - expiryBuffer.Milliseconds()
 
-	if err := saveAuth(cs.auth); err != nil {
+	if err := cs.store.Save(cs.auth); err != nil {
 		log.Printf("[credswap] warning: failed to persist refreshed token: %v", err)
 	}
 
@@ -81,6 +83,15 @@ func (cs *CredSwapper) SwapHeaders(req *http.Request) error {
 	cs.mu.Lock()
 	token := cs.auth.Access
 	cs.mu.Unlock()
+
+	// Log what we're replacing
+	if v := req.Header.Get("Authorization"); v != "" {
+		log.Printf("[credswap] replacing Authorization: %s -> Bearer %s", maskValue(v), maskValue(token))
+	} else if v := req.Header.Get("X-Api-Key"); v != "" {
+		log.Printf("[credswap] replacing X-Api-Key: %s -> Bearer %s", maskValue(v), maskValue(token))
+	} else {
+		log.Printf("[credswap] no client credentials found, injecting Bearer %s", maskValue(token))
+	}
 
 	// Remove any existing credential headers from the client
 	req.Header.Del("Authorization")

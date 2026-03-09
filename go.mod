@@ -2,4 +2,11 @@ module github.com/anish/anthropic-proxy
 
 go 1.25.0
 
-require gopkg.in/yaml.v3 v3.0.1 // indirect
+require (
+	al.essio.dev/pkg/shellescape v1.5.1 // indirect
+	github.com/danieljoos/wincred v1.2.2 // indirect
+	github.com/godbus/dbus/v5 v5.1.0 // indirect
+	github.com/zalando/go-keyring v0.2.6 // indirect
+	golang.org/x/sys v0.26.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+)

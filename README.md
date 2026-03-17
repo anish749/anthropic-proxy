@@ -28,7 +28,7 @@ prompts/system-2-replace.txt
 
 The file contents become the new text for that block.
 
-### Find and replace
+### Find and replace in system prompt blocks
 
 Create `prompts/replacements.yaml`:
 
@@ -61,6 +61,32 @@ The Claude Code system prompt is an array of text blocks. Typically:
 | 3 | Memory and environment |
 
 Blocks 0 and 1 are generally left unchanged. Blocks 2 and 3 are where personality and style live.
+
+### Find and replace in tool descriptions
+
+Create `prompts/tool_replacements.yaml` to patch tool descriptions before they reach the model. Each rule targets a tool by name and performs a substring find-and-replace on its description:
+
+```yaml
+- tool: Bash
+  find: "# Creating pull requests\n..."
+  replace: "# Creating pull requests\n..."
+
+- tool: Read
+  find: "some text to remove"
+  replace: ""
+  disabled: true  # skip this rule
+```
+
+Fields:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `tool` | yes | Tool name to target (e.g. `Bash`, `Read`, `Edit`, `Grep`, `Glob`, `Write`) |
+| `find` | yes | Substring to find in the tool's description |
+| `replace` | yes | Replacement text (`""` to delete) |
+| `disabled` | no | Set to `true` to skip the rule |
+
+Multiple rules can target the same tool and are applied in order. Unmatched find strings log a warning. Invalid YAML in either replacements file is a fatal startup error.
 
 ## Request logging
 

@@ -11,6 +11,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	systemReplacementsFile = "replacements.yaml"
+	toolReplacementsFile   = "tool_replacements.yaml"
+)
+
 type findReplaceRule struct {
 	Block    int    `yaml:"block"`
 	Find     string `yaml:"find"`
@@ -53,12 +58,12 @@ func NewRewriter(dir string) *Rewriter {
 	}
 
 	// Load find-and-replace rules from replacements.yaml
-	yamlPath := filepath.Join(dir, "replacements.yaml")
+	yamlPath := filepath.Join(dir, systemReplacementsFile)
 	data, err := os.ReadFile(yamlPath)
 	if err == nil {
 		var rules []findReplaceRule
 		if err := yaml.Unmarshal(data, &rules); err != nil {
-			log.Printf("rewriter: failed to parse %s: %v", yamlPath, err)
+			log.Fatalf("rewriter: failed to parse %s: %v", yamlPath, err)
 		} else {
 			loaded := 0
 			skipped := 0
@@ -75,12 +80,12 @@ func NewRewriter(dir string) *Rewriter {
 	}
 
 	// Load tool description find-and-replace rules from tool_replacements.yaml
-	toolYamlPath := filepath.Join(dir, "tool_replacements.yaml")
+	toolYamlPath := filepath.Join(dir, toolReplacementsFile)
 	toolData, err := os.ReadFile(toolYamlPath)
 	if err == nil {
 		var rules []toolReplaceRule
 		if err := yaml.Unmarshal(toolData, &rules); err != nil {
-			log.Printf("rewriter: failed to parse %s: %v", toolYamlPath, err)
+			log.Fatalf("rewriter: failed to parse %s: %v", toolYamlPath, err)
 		} else {
 			loaded := 0
 			skipped := 0

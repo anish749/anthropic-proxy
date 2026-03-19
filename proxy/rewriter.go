@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -27,7 +28,9 @@ type toolReplaceRule struct {
 	Tool     string `yaml:"tool"`
 	Find     string `yaml:"find"`
 	Replace  string `yaml:"replace"`
+	Regex    bool   `yaml:"regex"`
 	Disabled bool   `yaml:"disabled"`
+	re       *regexp.Regexp // compiled from Find when Regex: true
 }
 
 type Rewriter struct {
@@ -93,6 +96,13 @@ func NewRewriter(dir string) *Rewriter {
 				if r.Disabled {
 					skipped++
 					continue
+				}
+				if r.Regex {
+					re, err := regexp.Compile(r.Find)
+					if err != nil {
+						log.Fatalf("rewriter: invalid regex in tool replacement rule for %q: %v", r.Tool, err)
+					}
+					r.re = re
 				}
 				rw.toolReplace[r.Tool] = append(rw.toolReplace[r.Tool], r)
 				loaded++
@@ -238,11 +248,20 @@ func (rw *Rewriter) rewriteTools(toolsRaw json.RawMessage) (json.RawMessage, boo
 		}
 
 		for _, rule := range rules {
-			if strings.Contains(desc, rule.Find) {
-				desc = strings.ReplaceAll(desc, rule.Find, rule.Replace)
-				modified = true
+			if rule.re != nil {
+				if rule.re.MatchString(desc) {
+					desc = rule.re.ReplaceAllString(desc, rule.Replace)
+					modified = true
+				} else {
+					log.Printf("WARN: tool replacement rule (regex) for %q did not match: %q", name, rule.Find)
+				}
 			} else {
-				log.Printf("WARN: tool replacement rule for %q did not match: %q", name, rule.Find)
+				if strings.Contains(desc, rule.Find) {
+					desc = strings.ReplaceAll(desc, rule.Find, rule.Replace)
+					modified = true
+				} else {
+					log.Printf("WARN: tool replacement rule for %q did not match: %q", name, rule.Find)
+				}
 			}
 		}
 

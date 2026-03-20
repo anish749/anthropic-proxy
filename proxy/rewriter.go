@@ -19,8 +19,6 @@ const (
 
 	// Log a stats summary every statsLogInterval requests.
 	statsLogInterval = 50
-	// Warn about a zero-match rule after it has been evaluated this many times.
-	statsWarnThreshold = 10
 )
 
 type findReplaceRule struct {
@@ -31,12 +29,13 @@ type findReplaceRule struct {
 }
 
 type toolReplaceRule struct {
-	Tool     string `yaml:"tool"`
-	Find     string `yaml:"find"`
-	Replace  string `yaml:"replace"`
-	Regex    bool   `yaml:"regex"`
-	Disabled bool   `yaml:"disabled"`
-	re       *regexp.Regexp // compiled from Find when Regex: true
+	Tool      string `yaml:"tool"`
+	Find      string `yaml:"find"`
+	Replace   string `yaml:"replace"`
+	Regex     bool   `yaml:"regex"`
+	Disabled  bool   `yaml:"disabled"`
+	WarnAfter int    `yaml:"warn_after"` // warn if matched 0 times after this many evaluations (0 = never warn)
+	re        *regexp.Regexp              // compiled from Find when Regex: true
 
 	// match stats — updated atomically, never copied (rules stored as pointers)
 	seen    atomic.Int64
@@ -197,11 +196,14 @@ func (rw *Rewriter) Rewrite(body []byte) []byte {
 // checkStats logs a stats summary every statsLogInterval requests, and warns
 // immediately about any rule that has never matched despite enough evaluations.
 func (rw *Rewriter) checkStats(reqCount int64) {
-	// Per-request: warn about zero-match rules that have crossed the threshold.
+	// Per-request: warn about zero-match rules that have crossed their threshold.
 	for _, rules := range rw.toolReplace {
 		for _, r := range rules {
+			if r.WarnAfter <= 0 {
+				continue
+			}
 			seen := r.seen.Load()
-			if seen >= statsWarnThreshold && r.matched.Load() == 0 {
+			if seen >= int64(r.WarnAfter) && r.matched.Load() == 0 {
 				log.Printf("WARN: tool rule never matched after %d evaluations — may need updating: %s", seen, r.label())
 			}
 		}

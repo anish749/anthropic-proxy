@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 
 	"gopkg.in/yaml.v3"
 )
@@ -15,6 +16,11 @@ import (
 const (
 	systemReplacementsFile = "replacements.yaml"
 	toolReplacementsFile   = "tool_replacements.yaml"
+
+	// Log a stats summary every statsLogInterval requests.
+	statsLogInterval = 50
+	// Warn about a zero-match rule after it has been evaluated this many times.
+	statsWarnThreshold = 10
 )
 
 type findReplaceRule struct {
@@ -31,6 +37,24 @@ type toolReplaceRule struct {
 	Regex    bool   `yaml:"regex"`
 	Disabled bool   `yaml:"disabled"`
 	re       *regexp.Regexp // compiled from Find when Regex: true
+
+	// match stats — updated atomically, never copied (rules stored as pointers)
+	seen    atomic.Int64
+	matched atomic.Int64
+}
+
+// label returns a short human-readable identifier for log output.
+func (r *toolReplaceRule) label() string {
+	find := r.Find
+	if len(find) > 48 {
+		find = find[:48] + "…"
+	}
+	find = strings.ReplaceAll(find, "\n", "↵")
+	kind := ""
+	if r.Regex {
+		kind = " (regex)"
+	}
+	return fmt.Sprintf("%q%s: %q", r.Tool, kind, find)
 }
 
 type Rewriter struct {
@@ -38,15 +62,17 @@ type Rewriter struct {
 	fullReplace map[int]string
 	// findReplace maps block index → list of find/replace rules
 	findReplace map[int][]findReplaceRule
-	// toolReplace maps tool name → list of find/replace rules
-	toolReplace map[string][]toolReplaceRule
+	// toolReplace maps tool name → list of rules (pointers for atomic stats)
+	toolReplace map[string][]*toolReplaceRule
+
+	reqCount atomic.Int64
 }
 
 func NewRewriter(dir string) *Rewriter {
 	rw := &Rewriter{
 		fullReplace: make(map[int]string),
 		findReplace: make(map[int][]findReplaceRule),
-		toolReplace: make(map[string][]toolReplaceRule),
+		toolReplace: make(map[string][]*toolReplaceRule),
 	}
 
 	// Load full replacement files: system-{i}-replace.txt
@@ -92,7 +118,8 @@ func NewRewriter(dir string) *Rewriter {
 		} else {
 			loaded := 0
 			skipped := 0
-			for _, r := range rules {
+			for i := range rules {
+				r := &rules[i]
 				if r.Disabled {
 					skipped++
 					continue
@@ -160,7 +187,49 @@ func (rw *Rewriter) Rewrite(body []byte) []byte {
 		return body
 	}
 	log.Println("rewriter: request rewritten")
+
+	n := rw.reqCount.Add(1)
+	rw.checkStats(n)
+
 	return newBody
+}
+
+// checkStats logs a stats summary every statsLogInterval requests, and warns
+// immediately about any rule that has never matched despite enough evaluations.
+func (rw *Rewriter) checkStats(reqCount int64) {
+	// Per-request: warn about zero-match rules that have crossed the threshold.
+	for _, rules := range rw.toolReplace {
+		for _, r := range rules {
+			seen := r.seen.Load()
+			if seen >= statsWarnThreshold && r.matched.Load() == 0 {
+				log.Printf("WARN: tool rule never matched after %d evaluations — may need updating: %s", seen, r.label())
+			}
+		}
+	}
+
+	// Periodic: full summary every statsLogInterval requests.
+	if reqCount%statsLogInterval != 0 {
+		return
+	}
+	log.Printf("rewriter: stats after %d requests:", reqCount)
+	for _, rules := range rw.toolReplace {
+		for _, r := range rules {
+			seen := r.seen.Load()
+			matched := r.matched.Load()
+			if seen == 0 {
+				log.Printf("  [no data]  %s", r.label())
+				continue
+			}
+			pct := float64(matched) / float64(seen) * 100
+			flag := ""
+			if matched == 0 {
+				flag = " ← NEVER MATCHED"
+			} else if pct < 50 {
+				flag = " ← low match rate"
+			}
+			log.Printf("  matched %d/%d (%.0f%%)  %s%s", matched, seen, pct, r.label(), flag)
+		}
+	}
 }
 
 func (rw *Rewriter) rewriteSystem(systemRaw json.RawMessage) (json.RawMessage, bool) {
@@ -248,9 +317,11 @@ func (rw *Rewriter) rewriteTools(toolsRaw json.RawMessage) (json.RawMessage, boo
 		}
 
 		for _, rule := range rules {
+			rule.seen.Add(1)
 			if rule.re != nil {
 				if rule.re.MatchString(desc) {
 					desc = rule.re.ReplaceAllString(desc, rule.Replace)
+					rule.matched.Add(1)
 					modified = true
 				} else {
 					log.Printf("WARN: tool replacement rule (regex) for %q did not match: %q", name, rule.Find)
@@ -258,6 +329,7 @@ func (rw *Rewriter) rewriteTools(toolsRaw json.RawMessage) (json.RawMessage, boo
 			} else {
 				if strings.Contains(desc, rule.Find) {
 					desc = strings.ReplaceAll(desc, rule.Find, rule.Replace)
+					rule.matched.Add(1)
 					modified = true
 				} else {
 					log.Printf("WARN: tool replacement rule for %q did not match: %q", name, rule.Find)

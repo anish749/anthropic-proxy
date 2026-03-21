@@ -28,51 +28,52 @@ type replacementRule struct {
 	Replace   string `yaml:"replace"`
 	Regex     bool   `yaml:"regex"`      // tool: treat Find as a regex
 	Disabled  bool   `yaml:"disabled"`
-	WarnAfter int    `yaml:"warn_after"` // tool: warn if matched 0 times after N evaluations
+	WarnAfter int    `yaml:"warn_after"` // warn if matched 0 times after N evaluations
 }
 
-// systemRule is the internal representation of a system prompt find-replace rule.
-type systemRule struct {
-	Block   int
-	Find    string
-	Replace string
-}
+// rule is the internal representation of a find-replace rule (system or tool).
+// Stored as pointers so atomic stats counters work correctly.
+type rule struct {
+	// Type discriminator — only one of Block/Tool is meaningful per rule.
+	Block int    // system: which prompt block to target
+	Tool  string // tool: which tool name to target
 
-// toolRule is the internal representation of a tool description find-replace rule.
-type toolRule struct {
-	Tool      string
 	Find      string
 	Replace   string
 	Regex     bool
 	WarnAfter int
 	re        *regexp.Regexp // compiled from Find when Regex is true
 
-	// match stats — updated atomically, never copied (rules stored as pointers)
+	// match stats — updated atomically, never copied
 	seen    atomic.Int64
 	matched atomic.Int64
 }
 
 // label returns a short human-readable identifier for log output.
-func (r *toolRule) label() string {
+func (r *rule) label() string {
 	find := r.Find
 	if len(find) > 48 {
 		find = find[:48] + "…"
 	}
 	find = strings.ReplaceAll(find, "\n", "↵")
-	kind := ""
-	if r.Regex {
-		kind = " (regex)"
+
+	if r.Tool != "" {
+		kind := ""
+		if r.Regex {
+			kind = " (regex)"
+		}
+		return fmt.Sprintf("tool %q%s: %q", r.Tool, kind, find)
 	}
-	return fmt.Sprintf("%q%s: %q", r.Tool, kind, find)
+	return fmt.Sprintf("system block %d: %q", r.Block, find)
 }
 
 type Rewriter struct {
 	// fullReplace maps block index → replacement text
 	fullReplace map[int]string
 	// systemRules maps block index → list of find/replace rules
-	systemRules map[int][]systemRule
-	// toolRules maps tool name → list of rules (pointers for atomic stats)
-	toolRules map[string][]*toolRule
+	systemRules map[int][]*rule
+	// toolRules maps tool name → list of rules
+	toolRules map[string][]*rule
 
 	reqCount atomic.Int64
 }
@@ -80,8 +81,8 @@ type Rewriter struct {
 func NewRewriter(dir string) *Rewriter {
 	rw := &Rewriter{
 		fullReplace: make(map[int]string),
-		systemRules: make(map[int][]systemRule),
-		toolRules:   make(map[string][]*toolRule),
+		systemRules: make(map[int][]*rule),
+		toolRules:   make(map[string][]*rule),
 	}
 
 	// Load full replacement files: system-{i}-replace.txt
@@ -116,12 +117,13 @@ func NewRewriter(dir string) *Rewriter {
 			}
 			switch r.Type {
 			case "system":
-				rw.systemRules[r.Block] = append(rw.systemRules[r.Block], systemRule{
+				rw.systemRules[r.Block] = append(rw.systemRules[r.Block], &rule{
 					Block: r.Block, Find: r.Find, Replace: r.Replace,
+					WarnAfter: r.WarnAfter,
 				})
 				sysLoaded++
 			case "tool":
-				tr := &toolRule{
+				tr := &rule{
 					Tool: r.Tool, Find: r.Find, Replace: r.Replace,
 					Regex: r.Regex, WarnAfter: r.WarnAfter,
 				}
@@ -198,19 +200,31 @@ func (rw *Rewriter) Rewrite(body []byte) []byte {
 	return newBody
 }
 
+// allRules returns every rule across both system and tool maps.
+func (rw *Rewriter) allRules() []*rule {
+	var all []*rule
+	for _, rules := range rw.systemRules {
+		all = append(all, rules...)
+	}
+	for _, rules := range rw.toolRules {
+		all = append(all, rules...)
+	}
+	return all
+}
+
 // checkStats logs a stats summary every statsLogInterval requests, and warns
 // immediately about any rule that has never matched despite enough evaluations.
 func (rw *Rewriter) checkStats(reqCount int64) {
+	all := rw.allRules()
+
 	// Per-request: warn about zero-match rules that have crossed their threshold.
-	for _, rules := range rw.toolRules {
-		for _, r := range rules {
-			if r.WarnAfter <= 0 {
-				continue
-			}
-			seen := r.seen.Load()
-			if seen >= int64(r.WarnAfter) && r.matched.Load() == 0 {
-				slog.Warn("tool rule never matched — may need updating", "evals", seen, "rule", r.label())
-			}
+	for _, r := range all {
+		if r.WarnAfter <= 0 {
+			continue
+		}
+		seen := r.seen.Load()
+		if seen >= int64(r.WarnAfter) && r.matched.Load() == 0 {
+			slog.Warn("rule never matched — may need updating", "evals", seen, "rule", r.label())
 		}
 	}
 
@@ -219,26 +233,24 @@ func (rw *Rewriter) checkStats(reqCount int64) {
 		return
 	}
 	slog.Info("rewriter: stats summary", "requests", reqCount)
-	for _, rules := range rw.toolRules {
-		for _, r := range rules {
-			seen := r.seen.Load()
-			matched := r.matched.Load()
-			if seen == 0 {
-				slog.Info("rewriter: rule stats", "status", "no data", "rule", r.label())
-				continue
-			}
-			pct := float64(matched) / float64(seen) * 100
-			flag := ""
-			if matched == 0 {
-				flag = "NEVER MATCHED"
-			} else if pct < 50 {
-				flag = "low match rate"
-			}
-			if flag != "" {
-				slog.Warn("rewriter: rule stats", "matched", fmt.Sprintf("%d/%d (%.0f%%)", matched, seen, pct), "rule", r.label(), "flag", flag)
-			} else {
-				slog.Info("rewriter: rule stats", "matched", fmt.Sprintf("%d/%d (%.0f%%)", matched, seen, pct), "rule", r.label())
-			}
+	for _, r := range all {
+		seen := r.seen.Load()
+		matched := r.matched.Load()
+		if seen == 0 {
+			slog.Info("rewriter: rule stats", "status", "no data", "rule", r.label())
+			continue
+		}
+		pct := float64(matched) / float64(seen) * 100
+		flag := ""
+		if matched == 0 {
+			flag = "NEVER MATCHED"
+		} else if pct < 50 {
+			flag = "low match rate"
+		}
+		if flag != "" {
+			slog.Warn("rewriter: rule stats", "matched", fmt.Sprintf("%d/%d (%.0f%%)", matched, seen, pct), "rule", r.label(), "flag", flag)
+		} else {
+			slog.Info("rewriter: rule stats", "matched", fmt.Sprintf("%d/%d (%.0f%%)", matched, seen, pct), "rule", r.label())
 		}
 	}
 }
@@ -265,12 +277,14 @@ func (rw *Rewriter) rewriteSystem(systemRaw json.RawMessage) (json.RawMessage, b
 			text = replacement
 			modified = true
 		} else if rules, ok := rw.systemRules[i]; ok {
-			for _, rule := range rules {
-				if strings.Contains(text, rule.Find) {
-					text = strings.ReplaceAll(text, rule.Find, rule.Replace)
+			for _, r := range rules {
+				r.seen.Add(1)
+				if strings.Contains(text, r.Find) {
+					text = strings.ReplaceAll(text, r.Find, r.Replace)
+					r.matched.Add(1)
 					modified = true
 				} else {
-					slog.Warn("rewriter: replacement rule did not match", "block", i, "find", rule.Find)
+					slog.Warn("rewriter: system rule did not match", "block", i, "find", r.Find)
 				}
 			}
 		}

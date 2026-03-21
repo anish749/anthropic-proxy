@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 
@@ -11,9 +11,12 @@ import (
 )
 
 func main() {
+	proxy.SetupLogger()
+
 	if len(os.Args) > 1 && os.Args[1] == "login" {
 		if err := proxy.RunLogin(); err != nil {
-			log.Fatalf("login failed: %v", err)
+			slog.Error("login failed", "err", err)
+			os.Exit(1)
 		}
 		return
 	}
@@ -29,14 +32,17 @@ func main() {
 		SwapCreds:   *swapCreds,
 	})
 
-	fmt.Printf("anthropic-proxy listening on http://localhost%s\n", addr)
-	fmt.Printf("forwarding to https://api.anthropic.com\n")
+	slog.Info("anthropic-proxy listening", "addr", "http://localhost"+addr)
+	slog.Info("forwarding to https://api.anthropic.com")
 	if *swapCreds {
-		fmt.Println("credential swap: ENABLED (using logged-in OAuth token)")
+		slog.Info("credential swap: ENABLED (using logged-in OAuth token)")
 	}
 	fmt.Println()
 	fmt.Println("To use with Claude Code, run:")
 	fmt.Printf("  ANTHROPIC_BASE_URL=http://localhost%s claude\n\n", addr)
 
-	log.Fatal(http.ListenAndServe(addr, p))
+	if err := http.ListenAndServe(addr, p); err != nil {
+		slog.Error("server error", "err", err)
+		os.Exit(1)
+	}
 }

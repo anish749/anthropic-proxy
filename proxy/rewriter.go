@@ -3,7 +3,7 @@ package proxy
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -82,7 +82,7 @@ func NewRewriter(dir string) *Rewriter {
 			continue
 		}
 		rw.fullReplace[i] = string(data)
-		log.Printf("rewriter: loaded full replacement for block %d from %s", i, path)
+		slog.Info("rewriter: loaded full replacement", "block", i, "path", path)
 	}
 
 	// Load find-and-replace rules from replacements.yaml
@@ -91,7 +91,8 @@ func NewRewriter(dir string) *Rewriter {
 	if err == nil {
 		var rules []findReplaceRule
 		if err := yaml.Unmarshal(data, &rules); err != nil {
-			log.Fatalf("rewriter: failed to parse %s: %v", yamlPath, err)
+			slog.Error("rewriter: failed to parse file", "path", yamlPath, "err", err)
+			os.Exit(1)
 		} else {
 			loaded := 0
 			skipped := 0
@@ -103,7 +104,7 @@ func NewRewriter(dir string) *Rewriter {
 				rw.findReplace[r.Block] = append(rw.findReplace[r.Block], r)
 				loaded++
 			}
-			log.Printf("rewriter: loaded %d find-replace rules from %s (%d disabled)", loaded, yamlPath, skipped)
+			slog.Info("rewriter: loaded find-replace rules", "count", loaded, "path", yamlPath, "disabled", skipped)
 		}
 	}
 
@@ -113,7 +114,8 @@ func NewRewriter(dir string) *Rewriter {
 	if err == nil {
 		var rules []toolReplaceRule
 		if err := yaml.Unmarshal(toolData, &rules); err != nil {
-			log.Fatalf("rewriter: failed to parse %s: %v", toolYamlPath, err)
+			slog.Error("rewriter: failed to parse file", "path", toolYamlPath, "err", err)
+			os.Exit(1)
 		} else {
 			loaded := 0
 			skipped := 0
@@ -126,14 +128,15 @@ func NewRewriter(dir string) *Rewriter {
 				if r.Regex {
 					re, err := regexp.Compile(r.Find)
 					if err != nil {
-						log.Fatalf("rewriter: invalid regex in tool replacement rule for %q: %v", r.Tool, err)
+						slog.Error("rewriter: invalid regex in tool replacement rule", "tool", r.Tool, "err", err)
+					os.Exit(1)
 					}
 					r.re = re
 				}
 				rw.toolReplace[r.Tool] = append(rw.toolReplace[r.Tool], r)
 				loaded++
 			}
-			log.Printf("rewriter: loaded %d tool replacement rules from %s (%d disabled)", loaded, toolYamlPath, skipped)
+			slog.Info("rewriter: loaded tool replacement rules", "count", loaded, "path", toolYamlPath, "disabled", skipped)
 		}
 	}
 
@@ -177,7 +180,7 @@ func (rw *Rewriter) Rewrite(body []byte) []byte {
 	}
 
 	if !modified {
-		log.Println("rewriter: no modifications applied")
+		slog.Debug("rewriter: no modifications applied")
 		return body
 	}
 
@@ -185,7 +188,7 @@ func (rw *Rewriter) Rewrite(body []byte) []byte {
 	if err != nil {
 		return body
 	}
-	log.Println("rewriter: request rewritten")
+	slog.Info("rewriter: request rewritten")
 
 	n := rw.reqCount.Add(1)
 	rw.checkStats(n)
@@ -204,7 +207,7 @@ func (rw *Rewriter) checkStats(reqCount int64) {
 			}
 			seen := r.seen.Load()
 			if seen >= int64(r.WarnAfter) && r.matched.Load() == 0 {
-				log.Printf("WARN: tool rule never matched after %d evaluations — may need updating: %s", seen, r.label())
+				slog.Warn("tool rule never matched — may need updating", "evals", seen, "rule", r.label())
 			}
 		}
 	}
@@ -213,23 +216,27 @@ func (rw *Rewriter) checkStats(reqCount int64) {
 	if reqCount%statsLogInterval != 0 {
 		return
 	}
-	log.Printf("rewriter: stats after %d requests:", reqCount)
+	slog.Info("rewriter: stats summary", "requests", reqCount)
 	for _, rules := range rw.toolReplace {
 		for _, r := range rules {
 			seen := r.seen.Load()
 			matched := r.matched.Load()
 			if seen == 0 {
-				log.Printf("  [no data]  %s", r.label())
+				slog.Info("rewriter: rule stats", "status", "no data", "rule", r.label())
 				continue
 			}
 			pct := float64(matched) / float64(seen) * 100
 			flag := ""
 			if matched == 0 {
-				flag = " ← NEVER MATCHED"
+				flag = "NEVER MATCHED"
 			} else if pct < 50 {
-				flag = " ← low match rate"
+				flag = "low match rate"
 			}
-			log.Printf("  matched %d/%d (%.0f%%)  %s%s", matched, seen, pct, r.label(), flag)
+			if flag != "" {
+				slog.Warn("rewriter: rule stats", "matched", fmt.Sprintf("%d/%d (%.0f%%)", matched, seen, pct), "rule", r.label(), "flag", flag)
+			} else {
+				slog.Info("rewriter: rule stats", "matched", fmt.Sprintf("%d/%d (%.0f%%)", matched, seen, pct), "rule", r.label())
+			}
 		}
 	}
 }
@@ -261,7 +268,7 @@ func (rw *Rewriter) rewriteSystem(systemRaw json.RawMessage) (json.RawMessage, b
 					text = strings.ReplaceAll(text, rule.Find, rule.Replace)
 					modified = true
 				} else {
-					log.Printf("WARN: replacement rule for block %d did not match: %q", i, rule.Find)
+					slog.Warn("rewriter: replacement rule did not match", "block", i, "find", rule.Find)
 				}
 			}
 		}
@@ -283,7 +290,7 @@ func (rw *Rewriter) rewriteSystem(systemRaw json.RawMessage) (json.RawMessage, b
 	if err != nil {
 		return nil, false
 	}
-	log.Println("rewriter: system prompt rewritten")
+	slog.Info("rewriter: system prompt rewritten")
 	return newSystem, true
 }
 
@@ -326,7 +333,7 @@ func (rw *Rewriter) rewriteTools(toolsRaw json.RawMessage) (json.RawMessage, boo
 					rule.matched.Add(1)
 					modified = true
 				} else {
-					log.Printf("WARN: tool replacement rule (regex) for %q did not match: %q", name, rule.Find)
+					slog.Warn("rewriter: tool rule (regex) did not match", "tool", name, "find", rule.Find)
 				}
 			} else {
 				if strings.Contains(desc, rule.Find) {
@@ -334,7 +341,7 @@ func (rw *Rewriter) rewriteTools(toolsRaw json.RawMessage) (json.RawMessage, boo
 					rule.matched.Add(1)
 					modified = true
 				} else {
-					log.Printf("WARN: tool replacement rule for %q did not match: %q", name, rule.Find)
+					slog.Warn("rewriter: tool rule did not match", "tool", name, "find", rule.Find)
 				}
 			}
 		}
@@ -356,6 +363,6 @@ func (rw *Rewriter) rewriteTools(toolsRaw json.RawMessage) (json.RawMessage, boo
 	if err != nil {
 		return nil, false
 	}
-	log.Printf("rewriter: tool descriptions rewritten")
+	slog.Info("rewriter: tool descriptions rewritten")
 	return newTools, true
 }

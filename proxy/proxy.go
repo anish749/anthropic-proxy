@@ -3,8 +3,9 @@ package proxy
 import (
 	"bytes"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
+	"os"
 )
 
 const targetBase = "https://api.anthropic.com"
@@ -35,7 +36,8 @@ func New(opts Options) *Proxy {
 	if opts.SwapCreds {
 		cs, err := NewCredSwapper()
 		if err != nil {
-			log.Fatalf("[credswap] %v", err)
+			slog.Error("credswap: "+err.Error())
+			os.Exit(1)
 		}
 		p.credSwap = cs
 	}
@@ -80,7 +82,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Swap credentials if enabled
 	if p.credSwap != nil {
 		if err := p.credSwap.SwapHeaders(outReq); err != nil {
-			log.Printf("[credswap] failed to swap credentials: %v", err)
+			slog.Error("credswap: failed to swap credentials", "err", err)
 			http.Error(w, "credential swap failed", http.StatusInternalServerError)
 			return
 		}
@@ -89,7 +91,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Send request
 	resp, err := p.client.Do(outReq)
 	if err != nil {
-		log.Printf("upstream error: %v", err)
+		slog.Error("upstream error", "err", err)
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
 	}

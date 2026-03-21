@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -27,7 +27,7 @@ func (fl *FileLogger) Log(requestID string, reqBody, respBody []byte) {
 	}
 
 	if err := os.MkdirAll(fl.dir, 0o755); err != nil {
-		log.Printf("failed to create requests dir: %v", err)
+		slog.Error("failed to create requests dir", "err", err)
 		return
 	}
 
@@ -38,7 +38,7 @@ func (fl *FileLogger) Log(requestID string, reqBody, respBody []byte) {
 	fl.writeExtracted(prefix, parsedReq, fl.reqExtractors)
 	fl.writeExtractedRaw(prefix, respBody, fl.respExtractors)
 
-	fmt.Printf("logged request %s (model=%s)\n", requestID, model)
+	slog.Info("logged request", "id", requestID, "model", model)
 }
 
 func (fl *FileLogger) writeExtracted(prefix string, parsed map[string]json.RawMessage, extractors []Extractor) {
@@ -87,7 +87,7 @@ func (fl *FileLogger) writeFile(prefix, name string, raw json.RawMessage) {
 	filename := fmt.Sprintf("%s-%s.json", prefix, name)
 	path := filepath.Join(fl.dir, filename)
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
-		log.Printf("failed to write %s: %v", path, err)
+		slog.Error("failed to write file", "path", path, "err", err)
 	}
 }
 

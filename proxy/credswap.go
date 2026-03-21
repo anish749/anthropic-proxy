@@ -2,7 +2,7 @@ package proxy
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -42,7 +42,7 @@ func NewCredSwapper() (*CredSwapper, error) {
 	if err != nil {
 		return nil, fmt.Errorf("no credentials found — run 'login' first: %w", err)
 	}
-	log.Printf("[credswap] loaded OAuth token from %s: %s", store.Name(), maskValue(auth.Access))
+	slog.Info("credswap: loaded OAuth token", "store", store.Name(), "token", maskValue(auth.Access))
 	return &CredSwapper{auth: auth, store: store}, nil
 }
 
@@ -55,7 +55,7 @@ func (cs *CredSwapper) ensureFresh() error {
 		return nil
 	}
 
-	log.Printf("[credswap] token expired, refreshing...")
+	slog.Info("credswap: token expired, refreshing")
 	tok, err := refreshToken(cs.auth.Refresh)
 	if err != nil {
 		return fmt.Errorf("token refresh failed: %w", err)
@@ -66,10 +66,10 @@ func (cs *CredSwapper) ensureFresh() error {
 	cs.auth.Expires = time.Now().UnixMilli() + (tok.ExpiresIn * 1000) - expiryBuffer.Milliseconds()
 
 	if err := cs.store.Save(cs.auth); err != nil {
-		log.Printf("[credswap] warning: failed to persist refreshed token: %v", err)
+		slog.Warn("credswap: failed to persist refreshed token", "err", err)
 	}
 
-	log.Printf("[credswap] token refreshed successfully")
+	slog.Info("credswap: token refreshed")
 	return nil
 }
 
@@ -86,11 +86,11 @@ func (cs *CredSwapper) SwapHeaders(req *http.Request) error {
 
 	// Log what we're replacing
 	if v := req.Header.Get("Authorization"); v != "" {
-		log.Printf("[credswap] replacing Authorization: %s -> Bearer %s", maskValue(v), maskValue(token))
+		slog.Info("credswap: replacing Authorization", "from", maskValue(v), "to", maskValue(token))
 	} else if v := req.Header.Get("X-Api-Key"); v != "" {
-		log.Printf("[credswap] replacing X-Api-Key: %s -> Bearer %s", maskValue(v), maskValue(token))
+		slog.Info("credswap: replacing X-Api-Key", "from", maskValue(v), "to", maskValue(token))
 	} else {
-		log.Printf("[credswap] no client credentials found, injecting Bearer %s", maskValue(token))
+		slog.Info("credswap: no client credentials, injecting bearer token", "token", maskValue(token))
 	}
 
 	// Remove any existing credential headers from the client

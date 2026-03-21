@@ -3,7 +3,7 @@ package proxy
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -31,7 +31,7 @@ func NewAuthStore() AuthStore {
 		// Verify keychain access works by doing a no-op check.
 		// If it fails (e.g., headless environment), fall back to file.
 		if _, err := keyring.Get(keyringService, keyringUser); err != nil && err != keyring.ErrNotFound {
-			log.Printf("[authstore] keychain unavailable (%v), using file storage", err)
+			slog.Warn("authstore: keychain unavailable, using file storage", "err", err)
 			return &fileStore{}
 		}
 		return store

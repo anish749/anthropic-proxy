@@ -14,28 +14,38 @@ import (
 )
 
 const (
-	systemReplacementsFile = "replacements.yaml"
-	toolReplacementsFile   = "tool_replacements.yaml"
-
 	// Log a stats summary every statsLogInterval requests.
 	statsLogInterval = 50
 )
 
-type findReplaceRule struct {
-	Block    int    `yaml:"block"`
-	Find     string `yaml:"find"`
-	Replace  string `yaml:"replace"`
-	Disabled bool   `yaml:"disabled"`
-}
-
-type toolReplaceRule struct {
-	Tool      string `yaml:"tool"`
+// replacementRule is the unified YAML schema for all replacement rules.
+// The Type field determines whether a rule targets system prompt blocks or tool descriptions.
+type replacementRule struct {
+	Type      string `yaml:"type"`       // "system" or "tool"
+	Block     int    `yaml:"block"`      // system: which prompt block to target
+	Tool      string `yaml:"tool"`       // tool: which tool name to target
 	Find      string `yaml:"find"`
 	Replace   string `yaml:"replace"`
-	Regex     bool   `yaml:"regex"`
+	Regex     bool   `yaml:"regex"`      // tool: treat Find as a regex
 	Disabled  bool   `yaml:"disabled"`
-	WarnAfter int    `yaml:"warn_after"` // warn if matched 0 times after this many evaluations (0 = never warn)
-	re        *regexp.Regexp              // compiled from Find when Regex: true
+	WarnAfter int    `yaml:"warn_after"` // tool: warn if matched 0 times after N evaluations
+}
+
+// systemRule is the internal representation of a system prompt find-replace rule.
+type systemRule struct {
+	Block   int
+	Find    string
+	Replace string
+}
+
+// toolRule is the internal representation of a tool description find-replace rule.
+type toolRule struct {
+	Tool      string
+	Find      string
+	Replace   string
+	Regex     bool
+	WarnAfter int
+	re        *regexp.Regexp // compiled from Find when Regex is true
 
 	// match stats — updated atomically, never copied (rules stored as pointers)
 	seen    atomic.Int64
@@ -43,7 +53,7 @@ type toolReplaceRule struct {
 }
 
 // label returns a short human-readable identifier for log output.
-func (r *toolReplaceRule) label() string {
+func (r *toolRule) label() string {
 	find := r.Find
 	if len(find) > 48 {
 		find = find[:48] + "…"
@@ -59,10 +69,10 @@ func (r *toolReplaceRule) label() string {
 type Rewriter struct {
 	// fullReplace maps block index → replacement text
 	fullReplace map[int]string
-	// findReplace maps block index → list of find/replace rules
-	findReplace map[int][]findReplaceRule
-	// toolReplace maps tool name → list of rules (pointers for atomic stats)
-	toolReplace map[string][]*toolReplaceRule
+	// systemRules maps block index → list of find/replace rules
+	systemRules map[int][]systemRule
+	// toolRules maps tool name → list of rules (pointers for atomic stats)
+	toolRules map[string][]*toolRule
 
 	reqCount atomic.Int64
 }
@@ -70,8 +80,8 @@ type Rewriter struct {
 func NewRewriter(dir string) *Rewriter {
 	rw := &Rewriter{
 		fullReplace: make(map[int]string),
-		findReplace: make(map[int][]findReplaceRule),
-		toolReplace: make(map[string][]*toolReplaceRule),
+		systemRules: make(map[int][]systemRule),
+		toolRules:   make(map[string][]*toolRule),
 	}
 
 	// Load full replacement files: system-{i}-replace.txt
@@ -85,70 +95,62 @@ func NewRewriter(dir string) *Rewriter {
 		slog.Info("rewriter: loaded full replacement", "block", i, "path", path)
 	}
 
-	// Load find-and-replace rules from replacements.yaml
-	yamlPath := filepath.Join(dir, systemReplacementsFile)
-	data, err := os.ReadFile(yamlPath)
-	if err == nil {
-		var rules []findReplaceRule
-		if err := yaml.Unmarshal(data, &rules); err != nil {
-			slog.Error("rewriter: failed to parse file", "path", yamlPath, "err", err)
-			os.Exit(1)
-		} else {
-			loaded := 0
-			skipped := 0
-			for _, r := range rules {
-				if r.Disabled {
-					skipped++
-					continue
-				}
-				rw.findReplace[r.Block] = append(rw.findReplace[r.Block], r)
-				loaded++
-			}
-			slog.Info("rewriter: loaded find-replace rules", "count", loaded, "path", yamlPath, "disabled", skipped)
+	// Load all *.yaml files from the directory
+	files, _ := filepath.Glob(filepath.Join(dir, "*.yaml"))
+	for _, path := range files {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
 		}
-	}
-
-	// Load tool description find-and-replace rules from tool_replacements.yaml
-	toolYamlPath := filepath.Join(dir, toolReplacementsFile)
-	toolData, err := os.ReadFile(toolYamlPath)
-	if err == nil {
-		var rules []toolReplaceRule
-		if err := yaml.Unmarshal(toolData, &rules); err != nil {
-			slog.Error("rewriter: failed to parse file", "path", toolYamlPath, "err", err)
+		var rules []replacementRule
+		if err := yaml.Unmarshal(data, &rules); err != nil {
+			slog.Error("rewriter: failed to parse file", "path", path, "err", err)
 			os.Exit(1)
-		} else {
-			loaded := 0
-			skipped := 0
-			for i := range rules {
-				r := &rules[i]
-				if r.Disabled {
-					skipped++
-					continue
+		}
+
+		sysLoaded, toolLoaded, skipped := 0, 0, 0
+		for _, r := range rules {
+			if r.Disabled {
+				skipped++
+				continue
+			}
+			switch r.Type {
+			case "system":
+				rw.systemRules[r.Block] = append(rw.systemRules[r.Block], systemRule{
+					Block: r.Block, Find: r.Find, Replace: r.Replace,
+				})
+				sysLoaded++
+			case "tool":
+				tr := &toolRule{
+					Tool: r.Tool, Find: r.Find, Replace: r.Replace,
+					Regex: r.Regex, WarnAfter: r.WarnAfter,
 				}
 				if r.Regex {
 					re, err := regexp.Compile(r.Find)
 					if err != nil {
-						slog.Error("rewriter: invalid regex in tool replacement rule", "tool", r.Tool, "err", err)
-					os.Exit(1)
+						slog.Error("rewriter: invalid regex in rule", "tool", r.Tool, "err", err)
+						os.Exit(1)
 					}
-					r.re = re
+					tr.re = re
 				}
-				rw.toolReplace[r.Tool] = append(rw.toolReplace[r.Tool], r)
-				loaded++
+				rw.toolRules[r.Tool] = append(rw.toolRules[r.Tool], tr)
+				toolLoaded++
+			default:
+				slog.Warn("rewriter: unknown rule type, skipping", "type", r.Type, "path", path)
 			}
-			slog.Info("rewriter: loaded tool replacement rules", "count", loaded, "path", toolYamlPath, "disabled", skipped)
 		}
+		slog.Info("rewriter: loaded rules", "path", path, "system", sysLoaded, "tool", toolLoaded, "disabled", skipped)
 	}
 
 	return rw
 }
 
 func (rw *Rewriter) hasSystemRules() bool {
-	return len(rw.fullReplace) > 0 || len(rw.findReplace) > 0
+	return len(rw.fullReplace) > 0 || len(rw.systemRules) > 0
 }
 
 func (rw *Rewriter) Rewrite(body []byte) []byte {
-	if !rw.hasSystemRules() && len(rw.toolReplace) == 0 {
+	if !rw.hasSystemRules() && len(rw.toolRules) == 0 {
 		return body
 	}
 
@@ -170,7 +172,7 @@ func (rw *Rewriter) Rewrite(body []byte) []byte {
 	}
 
 	// Rewrite tool descriptions
-	if len(rw.toolReplace) > 0 {
+	if len(rw.toolRules) > 0 {
 		if toolsRaw, ok := parsed["tools"]; ok {
 			if newTools, changed := rw.rewriteTools(toolsRaw); changed {
 				parsed["tools"] = newTools
@@ -200,7 +202,7 @@ func (rw *Rewriter) Rewrite(body []byte) []byte {
 // immediately about any rule that has never matched despite enough evaluations.
 func (rw *Rewriter) checkStats(reqCount int64) {
 	// Per-request: warn about zero-match rules that have crossed their threshold.
-	for _, rules := range rw.toolReplace {
+	for _, rules := range rw.toolRules {
 		for _, r := range rules {
 			if r.WarnAfter <= 0 {
 				continue
@@ -217,7 +219,7 @@ func (rw *Rewriter) checkStats(reqCount int64) {
 		return
 	}
 	slog.Info("rewriter: stats summary", "requests", reqCount)
-	for _, rules := range rw.toolReplace {
+	for _, rules := range rw.toolRules {
 		for _, r := range rules {
 			seen := r.seen.Load()
 			matched := r.matched.Load()
@@ -262,7 +264,7 @@ func (rw *Rewriter) rewriteSystem(systemRaw json.RawMessage) (json.RawMessage, b
 		if replacement, ok := rw.fullReplace[i]; ok {
 			text = replacement
 			modified = true
-		} else if rules, ok := rw.findReplace[i]; ok {
+		} else if rules, ok := rw.systemRules[i]; ok {
 			for _, rule := range rules {
 				if strings.Contains(text, rule.Find) {
 					text = strings.ReplaceAll(text, rule.Find, rule.Replace)
@@ -311,7 +313,7 @@ func (rw *Rewriter) rewriteTools(toolsRaw json.RawMessage) (json.RawMessage, boo
 			continue
 		}
 
-		rules, ok := rw.toolReplace[name]
+		rules, ok := rw.toolRules[name]
 		if !ok {
 			continue
 		}

@@ -10,9 +10,20 @@ import (
 
 const targetBase = "https://api.anthropic.com"
 
+// RequestLogLevel controls when requests are logged to disk.
+type RequestLogLevel int
+
+const (
+	// LogOnWarnings logs requests only when rewrite rules produce warnings.
+	LogOnWarnings RequestLogLevel = iota
+	// LogAll logs every request.
+	LogAll
+)
+
 type Proxy struct {
-	client     *http.Client
+	client   *http.Client
 	fileLogger *FileLogger
+	logLevel   RequestLogLevel
 	rewriter   *Rewriter
 	credSwap   *CredSwapper
 }
@@ -23,15 +34,18 @@ type Options struct {
 }
 
 func New(opts Options) *Proxy {
+	logLevel := LogOnWarnings
+	if opts.LogRequests {
+		logLevel = LogAll
+	}
 	p := &Proxy{
 		client:   &http.Client{},
 		rewriter: NewRewriter("prompts"),
-	}
-	if opts.LogRequests {
-		p.fileLogger = NewFileLogger("requests",
+		fileLogger: NewFileLogger("requests",
 			[]Extractor{ToolsExtractor{}, MessagesExtractor{}, SystemExtractor{}},
 			[]Extractor{UsageExtractor{}},
-		)
+		),
+		logLevel: logLevel,
 	}
 	if opts.SwapCreds {
 		cs, err := NewCredSwapper()
@@ -108,8 +122,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	reqID := resp.Header.Get("Request-Id")
 	warnings.Flush(reqID)
 
-	// Log request parts to files for Anthropic Messages API calls
-	if p.fileLogger != nil && r.Method == http.MethodPost && r.URL.Path == "/v1/messages" {
+	// Log request parts to files for Anthropic Messages API calls:
+	// always when LogAll, or on-demand when there are rewrite warnings.
+	shouldLog := r.Method == http.MethodPost && r.URL.Path == "/v1/messages" &&
+		(p.logLevel >= LogAll || warnings.HasWarnings())
+	if shouldLog {
 		if reqID != "" {
 			p.fileLogger.Log(reqID, reqBody, respBody)
 		} else {

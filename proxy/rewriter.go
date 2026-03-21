@@ -82,6 +82,11 @@ func (w *Warnings) add(msg string, args ...any) {
 	w.entries = append(w.entries, logEntry{msg, args})
 }
 
+// HasWarnings reports whether any warnings were collected.
+func (w *Warnings) HasWarnings() bool {
+	return len(w.entries) > 0
+}
+
 // Flush logs all collected warnings. If reqID is non-empty, it is
 // appended to each log line so warnings can be correlated with
 // logged request files.

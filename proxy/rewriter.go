@@ -67,6 +67,34 @@ func (r *rule) label() string {
 	return fmt.Sprintf("system block %d: %q", r.Block, find)
 }
 
+// Warnings collects log messages during rewriting so they can be
+// flushed later with the upstream request ID for correlation.
+type Warnings struct {
+	entries []logEntry
+}
+
+type logEntry struct {
+	msg  string
+	args []any
+}
+
+func (w *Warnings) add(msg string, args ...any) {
+	w.entries = append(w.entries, logEntry{msg, args})
+}
+
+// Flush logs all collected warnings. If reqID is non-empty, it is
+// appended to each log line so warnings can be correlated with
+// logged request files.
+func (w *Warnings) Flush(reqID string) {
+	for _, e := range w.entries {
+		args := e.args
+		if reqID != "" {
+			args = append(args, "req", reqID)
+		}
+		slog.Warn(e.msg, args...)
+	}
+}
+
 type Rewriter struct {
 	// fullReplace maps block index → replacement text
 	fullReplace map[int]string
@@ -151,14 +179,16 @@ func (rw *Rewriter) hasSystemRules() bool {
 	return len(rw.fullReplace) > 0 || len(rw.systemRules) > 0
 }
 
-func (rw *Rewriter) Rewrite(body []byte) []byte {
+func (rw *Rewriter) Rewrite(body []byte) ([]byte, *Warnings) {
+	w := &Warnings{}
+
 	if !rw.hasSystemRules() && len(rw.toolRules) == 0 {
-		return body
+		return body, w
 	}
 
 	var parsed map[string]json.RawMessage
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return body
+		return body, w
 	}
 
 	modified := false
@@ -166,7 +196,7 @@ func (rw *Rewriter) Rewrite(body []byte) []byte {
 	// Rewrite system prompt blocks
 	if rw.hasSystemRules() {
 		if systemRaw, ok := parsed["system"]; ok {
-			if newSystem, changed := rw.rewriteSystem(systemRaw); changed {
+			if newSystem, changed := rw.rewriteSystem(systemRaw, w); changed {
 				parsed["system"] = newSystem
 				modified = true
 			}
@@ -176,7 +206,7 @@ func (rw *Rewriter) Rewrite(body []byte) []byte {
 	// Rewrite tool descriptions
 	if len(rw.toolRules) > 0 {
 		if toolsRaw, ok := parsed["tools"]; ok {
-			if newTools, changed := rw.rewriteTools(toolsRaw); changed {
+			if newTools, changed := rw.rewriteTools(toolsRaw, w); changed {
 				parsed["tools"] = newTools
 				modified = true
 			}
@@ -185,19 +215,19 @@ func (rw *Rewriter) Rewrite(body []byte) []byte {
 
 	if !modified {
 		slog.Debug("rewriter: no modifications applied")
-		return body
+		return body, w
 	}
 
 	newBody, err := json.Marshal(parsed)
 	if err != nil {
-		return body
+		return body, w
 	}
 	slog.Info("rewriter: request rewritten")
 
 	n := rw.reqCount.Add(1)
 	rw.checkStats(n)
 
-	return newBody
+	return newBody, w
 }
 
 // allRules returns every rule across both system and tool maps.
@@ -255,7 +285,7 @@ func (rw *Rewriter) checkStats(reqCount int64) {
 	}
 }
 
-func (rw *Rewriter) rewriteSystem(systemRaw json.RawMessage) (json.RawMessage, bool) {
+func (rw *Rewriter) rewriteSystem(systemRaw json.RawMessage, w *Warnings) (json.RawMessage, bool) {
 	var blocks []map[string]json.RawMessage
 	if err := json.Unmarshal(systemRaw, &blocks); err != nil {
 		return nil, false
@@ -284,7 +314,7 @@ func (rw *Rewriter) rewriteSystem(systemRaw json.RawMessage) (json.RawMessage, b
 					r.matched.Add(1)
 					modified = true
 				} else {
-					slog.Warn("rewriter: system rule did not match", "block", i, "find", r.Find)
+					w.add("rewriter: system rule did not match", "block", i, "rule", r.label())
 				}
 			}
 		}
@@ -310,7 +340,7 @@ func (rw *Rewriter) rewriteSystem(systemRaw json.RawMessage) (json.RawMessage, b
 	return newSystem, true
 }
 
-func (rw *Rewriter) rewriteTools(toolsRaw json.RawMessage) (json.RawMessage, bool) {
+func (rw *Rewriter) rewriteTools(toolsRaw json.RawMessage, w *Warnings) (json.RawMessage, bool) {
 	var tools []map[string]json.RawMessage
 	if err := json.Unmarshal(toolsRaw, &tools); err != nil {
 		return nil, false
@@ -349,7 +379,7 @@ func (rw *Rewriter) rewriteTools(toolsRaw json.RawMessage) (json.RawMessage, boo
 					rule.matched.Add(1)
 					modified = true
 				} else {
-					slog.Warn("rewriter: tool rule (regex) did not match", "tool", name, "find", rule.Find)
+					w.add("rewriter: tool rule (regex) did not match", "tool", name, "rule", rule.label())
 				}
 			} else {
 				if strings.Contains(desc, rule.Find) {
@@ -357,7 +387,7 @@ func (rw *Rewriter) rewriteTools(toolsRaw json.RawMessage) (json.RawMessage, boo
 					rule.matched.Add(1)
 					modified = true
 				} else {
-					slog.Warn("rewriter: tool rule did not match", "tool", name, "find", rule.Find)
+					w.add("rewriter: tool rule did not match", "tool", name, "rule", rule.label())
 				}
 			}
 		}

@@ -63,7 +63,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Rewrite system prompt if rules are configured
-	rewrittenBody := p.rewriter.Rewrite(reqBody)
+	rewrittenBody, warnings := p.rewriter.Rewrite(reqBody)
 
 	// Build outgoing request
 	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, bytes.NewReader(rewrittenBody))
@@ -104,10 +104,16 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Flush rewrite warnings with the upstream request ID for correlation
+	reqID := resp.Header.Get("Request-Id")
+	warnings.Flush(reqID)
+
 	// Log request parts to files for Anthropic Messages API calls
 	if p.fileLogger != nil && r.Method == http.MethodPost && r.URL.Path == "/v1/messages" {
-		if reqID := resp.Header.Get("Request-Id"); reqID != "" {
+		if reqID != "" {
 			p.fileLogger.Log(reqID, reqBody, respBody)
+		} else {
+			slog.Error("filelogger: missing Request-Id header, skipping log")
 		}
 	}
 

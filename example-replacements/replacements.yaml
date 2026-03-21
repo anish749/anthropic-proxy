@@ -1,0 +1,4 @@
+
+- block: 2
+  find: "Only validate at system boundaries (user input, external APIs)."
+  replace: "Only validate at system boundaries (user input, external APIs, databases, network calls). At these boundaries, always propagate errors — never swallow them with a fallback value that would hide the failure or allow execution to continue incorrectly."

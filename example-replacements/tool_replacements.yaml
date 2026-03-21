@@ -1,0 +1,65 @@
+# Tool description find-and-replace rules.
+# Each rule targets a tool by name and performs a find/replace on its description.
+#
+# Fields:
+#   tool:       Tool name (e.g., "Bash", "Read", "Edit", "Grep", "Glob", "Write")
+#   find:       Text to find in the tool's description
+#   replace:    Text to replace it with (use "" to delete)
+#   regex:      Set to true to treat find as a regular expression
+#   disabled:   Set to true to skip this rule
+#   warn_after: Warn if this rule has matched 0 times after N evaluations (omit to never warn)
+
+- tool: Bash
+  warn_after: 5
+  find: |-
+    <example>
+    gh pr create --title "the pr title" --body "$(cat <<'EOF'
+    ## Summary
+    <1-3 bullet points>
+
+    ## Test plan
+    [Bulleted markdown checklist of TODOs for testing the pull request...]
+
+    🤖 Generated with [Claude Code](https://claude.com/claude-code)
+    EOF
+    )"
+    </example>
+  replace: |-
+    <example>
+    gh pr create --title "the pr title" --body "$(cat <<'EOF'
+    ## Problem
+    <Short description of the problem being solved>
+
+    ## Solution
+    <Short description of the solution implemented>
+
+    ## Context
+    <Any additional context, related bugs, or reasoning — omit if not needed>
+    EOF
+    )"
+    </example>
+
+- tool: Bash
+  regex: true
+  warn_after: 5
+  find: "   - Create the commit with a message ending with:\n   Co-Authored-By: Claude .+ <noreply@anthropic\\.com>\n   - Run git st"
+  replace: "   - Create the commit.\n   - Run git st"
+
+- tool: Bash
+  regex: true
+  warn_after: 5
+  find: |-
+    In order to ensure good formatting, ALWAYS pass the commit message via a HEREDOC, a la this example:
+    <example>
+    git commit -m "\$\(cat <<'EOF'
+       Commit message here\.
+
+       Co-Authored-By: Claude .+ <noreply@anthropic\.com>
+       EOF
+       \)"
+    </example>
+  replace: |-
+    Format commit messages as:
+    <example>
+    git commit -m '<component>: <lower case upto 70 character message here>'
+    </example>

@@ -14,40 +14,57 @@ Then start Claude Code pointing at the proxy:
 ANTHROPIC_BASE_URL=http://localhost:8080 claude
 ```
 
-## System prompt rewriting
+## Rewriting rules
 
-Create a `prompts/` directory to modify the system prompt before it reaches Anthropic.
+All `*.yaml` files in `prompts/` are loaded and merged at startup. Every rule uses the same schema with a `type` field to distinguish between system prompt and tool description replacements. You can organize rules across as many files as you like — split by concern, keep everything in one file, whatever works for you.
 
-### Full replacement
+Files matching `*replacements.local.yaml` are gitignored for local overrides.
 
-Replace an entire system prompt block by index:
-
-```
-prompts/system-2-replace.txt
-```
-
-The file contents become the new text for that block.
-
-### Find and replace in system prompt blocks
-
-Create `prompts/replacements.yaml`:
+### Rule schema
 
 ```yaml
-- block: 2
-  find: |
-    # Tone and style
-     - Your responses should be short and concise.
-  replace: |
-    # Custom personality
-    You are a friendly pirate. Respond in pirate speak.
-
-- block: 3
-  find: "some text"
-  replace: "new text"
-  disabled: true  # skip this rule
+- type: system          # or "tool"
+  block: 2              # system: which prompt block to target
+  tool: Bash            # tool: which tool name to target
+  find: "text to find"
+  replace: "replacement"
+  regex: false          # tool: treat find as a regex (default: false)
+  disabled: false       # skip this rule (default: false)
+  warn_after: 5         # tool: warn if unmatched after N evals (default: never)
 ```
 
-Full replacement files take precedence over find-and-replace rules for the same block. Unmatched find rules log a warning.
+### System prompt rules (`type: system`)
+
+Find-and-replace within a system prompt block by index:
+
+```yaml
+- type: system
+  block: 2
+  find: "Your responses should be short and concise."
+  replace: "You are a friendly pirate. Respond in pirate speak."
+```
+
+Full replacement files (`prompts/system-{i}-replace.txt`) are also supported and take precedence over find-and-replace rules for the same block.
+
+### Tool description rules (`type: tool`)
+
+Patch tool descriptions before they reach the model:
+
+```yaml
+- type: tool
+  tool: Bash
+  find: "# Creating pull requests\n..."
+  replace: "# Creating pull requests\n..."
+
+- type: tool
+  tool: Bash
+  regex: true
+  warn_after: 5
+  find: "Co-Authored-By: Claude .+ <noreply@anthropic\\.com>"
+  replace: ""
+```
+
+Multiple rules can target the same tool and are applied in order.
 
 ### Block indices
 
@@ -62,31 +79,9 @@ The Claude Code system prompt is an array of text blocks. Typically:
 
 Blocks 0 and 1 are generally left unchanged. Blocks 2 and 3 are where personality and style live.
 
-### Find and replace in tool descriptions
+### Diagnostics
 
-Create `prompts/tool_replacements.yaml` to patch tool descriptions before they reach the model. Each rule targets a tool by name and performs a substring find-and-replace on its description:
-
-```yaml
-- tool: Bash
-  find: "# Creating pull requests\n..."
-  replace: "# Creating pull requests\n..."
-
-- tool: Read
-  find: "some text to remove"
-  replace: ""
-  disabled: true  # skip this rule
-```
-
-Fields:
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `tool` | yes | Tool name to target (e.g. `Bash`, `Read`, `Edit`, `Grep`, `Glob`, `Write`) |
-| `find` | yes | Substring to find in the tool's description |
-| `replace` | yes | Replacement text (`""` to delete) |
-| `disabled` | no | Set to `true` to skip the rule |
-
-Multiple rules can target the same tool and are applied in order. Unmatched find strings log a warning. Invalid YAML in either replacements file is a fatal startup error.
+Unmatched find strings log a warning. Tool rules track match stats and log a summary every 50 requests. Invalid YAML is a fatal startup error.
 
 ## Request logging
 

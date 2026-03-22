@@ -26,6 +26,7 @@ var (
 	port      int
 	logReqs   bool
 	swapCreds bool
+	logFormat string
 )
 
 func init() {
@@ -36,6 +37,7 @@ func init() {
 	rootCmd.Flags().IntVar(&port, "port", 8080, "port to listen on")
 	rootCmd.Flags().BoolVar(&logReqs, "log", false, "log requests to the requests/ directory")
 	rootCmd.Flags().BoolVar(&swapCreds, "swap-creds", false, "replace client credentials with logged-in OAuth token")
+	rootCmd.Flags().StringVar(&logFormat, "log-format", "json", "output format for logged requests (json, yaml)")
 }
 
 // Execute runs the root command.
@@ -51,6 +53,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	p := proxy.New(proxy.Options{
 		LogRequests: logReqs,
 		SwapCreds:   swapCreds,
+		LogFormat:   logFormat,
 	})
 	p.WatchPrompts()
 

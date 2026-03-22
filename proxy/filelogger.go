@@ -8,16 +8,22 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 type FileLogger struct {
 	dir            string
+	format         string // "json" or "yaml"
 	reqExtractors  []Extractor
 	respExtractors []Extractor
 }
 
-func NewFileLogger(dir string, reqExtractors []Extractor, respExtractors []Extractor) *FileLogger {
-	return &FileLogger{dir: dir, reqExtractors: reqExtractors, respExtractors: respExtractors}
+func NewFileLogger(dir string, format string, reqExtractors []Extractor, respExtractors []Extractor) *FileLogger {
+	if format == "" {
+		format = "json"
+	}
+	return &FileLogger{dir: dir, format: format, reqExtractors: reqExtractors, respExtractors: respExtractors}
 }
 
 func (fl *FileLogger) Log(requestID string, reqBody, respBody []byte) {
@@ -79,14 +85,35 @@ func (fl *FileLogger) writeExtractedRaw(prefix string, body []byte, extractors [
 }
 
 func (fl *FileLogger) writeFile(prefix, name string, raw json.RawMessage) {
-	var buf bytes.Buffer
-	if err := json.Indent(&buf, raw, "", "  "); err != nil {
-		return
+	var data []byte
+	var ext string
+
+	switch fl.format {
+	case "yaml":
+		var obj any
+		if err := json.Unmarshal(raw, &obj); err != nil {
+			slog.Error("failed to parse JSON for YAML conversion", "err", err)
+			return
+		}
+		out, err := yaml.Marshal(obj)
+		if err != nil {
+			slog.Error("failed to marshal YAML", "err", err)
+			return
+		}
+		data = out
+		ext = "yaml"
+	default:
+		var buf bytes.Buffer
+		if err := json.Indent(&buf, raw, "", "  "); err != nil {
+			return
+		}
+		data = buf.Bytes()
+		ext = "json"
 	}
 
-	filename := fmt.Sprintf("%s-%s.json", prefix, name)
+	filename := fmt.Sprintf("%s-%s.%s", prefix, name, ext)
 	path := filepath.Join(fl.dir, filename)
-	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		slog.Error("failed to write file", "path", path, "err", err)
 	}
 }

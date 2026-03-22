@@ -31,6 +31,7 @@ type Proxy struct {
 type Options struct {
 	LogRequests bool
 	SwapCreds   bool
+	LogFormat   string // "json", "yaml", or "markdown"
 }
 
 func New(opts Options) *Proxy {
@@ -41,7 +42,7 @@ func New(opts Options) *Proxy {
 	p := &Proxy{
 		client:   &http.Client{},
 		rewriter: NewRewriter("prompts"),
-		fileLogger: NewFileLogger("requests",
+		fileLogger: NewFileLogger("requests", opts.LogFormat,
 			[]Extractor{ToolsExtractor{}, MessagesExtractor{}, SystemExtractor{}, SystemRemindersExtractor{}},
 			[]Extractor{UsageExtractor{}},
 		),

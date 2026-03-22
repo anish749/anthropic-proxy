@@ -21,7 +21,7 @@ type FileLogger struct {
 
 func NewFileLogger(dir string, format string, reqExtractors []Extractor, respExtractors []Extractor) *FileLogger {
 	if format == "" {
-		format = "json"
+		format = "yaml"
 	}
 	return &FileLogger{dir: dir, format: format, reqExtractors: reqExtractors, respExtractors: respExtractors}
 }

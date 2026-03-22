@@ -37,7 +37,7 @@ func init() {
 	rootCmd.Flags().IntVar(&port, "port", 8080, "port to listen on")
 	rootCmd.Flags().BoolVar(&logReqs, "log", false, "log requests to the requests/ directory")
 	rootCmd.Flags().BoolVar(&swapCreds, "swap-creds", false, "replace client credentials with logged-in OAuth token")
-	rootCmd.Flags().StringVar(&logFormat, "log-format", "json", "output format for logged requests (json, yaml)")
+	rootCmd.Flags().StringVar(&logFormat, "log-format", "yaml", "output format for logged requests (json, yaml)")
 }
 
 // Execute runs the root command.

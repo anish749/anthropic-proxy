@@ -10,6 +10,13 @@ var _ Extractor = (*SystemRemindersExtractor)(nil)
 
 var systemReminderRe = regexp.MustCompile(`(?s)<system-reminder>\s*(.*?)\s*</system-reminder>`)
 
+type systemReminder struct {
+	MessageIndex     int    `json:"message_index"`      // position in the full messages array (0-based)
+	UserMessageIndex int    `json:"user_message_index"`  // position among user messages only (0-based)
+	Turn             int    `json:"turn"`                // conversation turn (user+assistant = 1 turn, 1-based)
+	Text             string `json:"text"`                // full text including <system-reminder> tags
+}
+
 // SystemRemindersExtractor extracts <system-reminder> blocks from user messages.
 type SystemRemindersExtractor struct{}
 
@@ -30,8 +37,13 @@ func (SystemRemindersExtractor) Extract(body map[string]json.RawMessage) (json.R
 		return nil, false
 	}
 
-	var reminders []string
-	for _, msg := range msgs {
+	var reminders []systemReminder
+	userMsgIdx := 0
+	turn := 0
+	for i, msg := range msgs {
+		if msg.Role == "user" {
+			turn++
+		}
 		if msg.Role != "user" {
 			continue
 		}
@@ -42,6 +54,7 @@ func (SystemRemindersExtractor) Extract(body map[string]json.RawMessage) (json.R
 		}
 		if err := json.Unmarshal(msg.Content, &blocks); err != nil {
 			slog.Warn("system-reminders: failed to parse message content", "err", err)
+			userMsgIdx++
 			continue
 		}
 
@@ -49,11 +62,17 @@ func (SystemRemindersExtractor) Extract(body map[string]json.RawMessage) (json.R
 			if block.Type != "text" {
 				continue
 			}
-			matches := systemReminderRe.FindAllStringSubmatch(block.Text, -1)
+			matches := systemReminderRe.FindAllString(block.Text, -1)
 			for _, match := range matches {
-				reminders = append(reminders, match[1])
+				reminders = append(reminders, systemReminder{
+					MessageIndex:     i,
+					UserMessageIndex: userMsgIdx,
+					Turn:             turn,
+					Text:             match,
+				})
 			}
 		}
+		userMsgIdx++
 	}
 
 	if len(reminders) == 0 {

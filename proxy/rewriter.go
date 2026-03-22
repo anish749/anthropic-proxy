@@ -19,24 +19,25 @@ const (
 )
 
 // replacementRule is the unified YAML schema for all replacement rules.
-// The Type field determines whether a rule targets system prompt blocks or tool descriptions.
+// The Type field determines whether a rule targets system prompt blocks,
+// tool descriptions, or system-reminder blocks in user messages.
 type replacementRule struct {
-	Type      string `yaml:"type"`       // "system" or "tool"
+	Type      string `yaml:"type"`       // "system", "tool", or "system-reminder"
 	Block     int    `yaml:"block"`      // system: which prompt block to target
 	Tool      string `yaml:"tool"`       // tool: which tool name to target
 	Find      string `yaml:"find"`
 	Replace   string `yaml:"replace"`
-	Regex     bool   `yaml:"regex"`      // tool: treat Find as a regex
+	Regex     bool   `yaml:"regex"`      // treat Find as a regex
 	Disabled  bool   `yaml:"disabled"`
 	WarnAfter int    `yaml:"warn_after"` // warn if matched 0 times after N evaluations
 }
 
-// rule is the internal representation of a find-replace rule (system or tool).
+// rule is the internal representation of a find-replace rule (system, tool, or system-reminder).
 // Stored as pointers so atomic stats counters work correctly.
 type rule struct {
-	// Type discriminator — only one of Block/Tool is meaningful per rule.
-	Block int    // system: which prompt block to target
-	Tool  string // tool: which tool name to target
+	RuleType string // "system", "tool", or "system-reminder"
+	Block    int    // system: which prompt block to target
+	Tool     string // tool: which tool name to target
 
 	Find      string
 	Replace   string
@@ -57,14 +58,19 @@ func (r *rule) label() string {
 	}
 	find = strings.ReplaceAll(find, "\n", "↵")
 
-	if r.Tool != "" {
-		kind := ""
-		if r.Regex {
-			kind = " (regex)"
-		}
-		return fmt.Sprintf("tool %q%s: %q", r.Tool, kind, find)
+	kind := ""
+	if r.Regex {
+		kind = " (regex)"
 	}
-	return fmt.Sprintf("system block %d: %q", r.Block, find)
+
+	switch r.RuleType {
+	case "tool":
+		return fmt.Sprintf("tool %q%s: %q", r.Tool, kind, find)
+	case "system-reminder":
+		return fmt.Sprintf("system-reminder%s: %q", kind, find)
+	default:
+		return fmt.Sprintf("system block %d%s: %q", r.Block, kind, find)
+	}
 }
 
 // Warnings collects log messages during rewriting so they can be
@@ -103,9 +109,10 @@ func (w *Warnings) Flush(reqID string) {
 // rewriterState holds the immutable rule set for a single load generation.
 // Swapped atomically so in-flight requests see a consistent snapshot.
 type rewriterState struct {
-	fullReplace map[int]string
-	systemRules map[int][]*rule
-	toolRules   map[string][]*rule
+	fullReplace   map[int]string
+	systemRules   map[int][]*rule
+	toolRules     map[string][]*rule
+	reminderRules []*rule
 }
 
 func (s *rewriterState) hasSystemRules() bool {
@@ -120,6 +127,7 @@ func (s *rewriterState) allRules() []*rule {
 	for _, rules := range s.toolRules {
 		all = append(all, rules...)
 	}
+	all = append(all, s.reminderRules...)
 	return all
 }
 
@@ -172,38 +180,47 @@ func loadRules(dir string) (*rewriterState, error) {
 			return nil, fmt.Errorf("failed to parse %s: %w", path, err)
 		}
 
-		sysLoaded, toolLoaded, skipped := 0, 0, 0
+		sysLoaded, toolLoaded, reminderLoaded, skipped := 0, 0, 0, 0
 		for _, r := range rules {
 			if r.Disabled {
 				skipped++
 				continue
 			}
+
+			// Compile regex if needed (shared by tool and system-reminder rules)
+			var compiled *regexp.Regexp
+			if r.Regex {
+				re, err := regexp.Compile(r.Find)
+				if err != nil {
+					return nil, fmt.Errorf("invalid regex in %s rule: %w", r.Type, err)
+				}
+				compiled = re
+			}
+
 			switch r.Type {
 			case "system":
 				s.systemRules[r.Block] = append(s.systemRules[r.Block], &rule{
-					Block: r.Block, Find: r.Find, Replace: r.Replace,
-					WarnAfter: r.WarnAfter,
+					RuleType: "system", Block: r.Block, Find: r.Find, Replace: r.Replace,
+					Regex: r.Regex, re: compiled, WarnAfter: r.WarnAfter,
 				})
 				sysLoaded++
 			case "tool":
-				tr := &rule{
-					Tool: r.Tool, Find: r.Find, Replace: r.Replace,
-					Regex: r.Regex, WarnAfter: r.WarnAfter,
-				}
-				if r.Regex {
-					re, err := regexp.Compile(r.Find)
-					if err != nil {
-						return nil, fmt.Errorf("invalid regex in rule (tool %s): %w", r.Tool, err)
-					}
-					tr.re = re
-				}
-				s.toolRules[r.Tool] = append(s.toolRules[r.Tool], tr)
+				s.toolRules[r.Tool] = append(s.toolRules[r.Tool], &rule{
+					RuleType: "tool", Tool: r.Tool, Find: r.Find, Replace: r.Replace,
+					Regex: r.Regex, re: compiled, WarnAfter: r.WarnAfter,
+				})
 				toolLoaded++
+			case "system-reminder":
+				s.reminderRules = append(s.reminderRules, &rule{
+					RuleType: "system-reminder", Find: r.Find, Replace: r.Replace,
+					Regex: r.Regex, re: compiled, WarnAfter: r.WarnAfter,
+				})
+				reminderLoaded++
 			default:
 				slog.Warn("rewriter: unknown rule type, skipping", "type", r.Type, "path", path)
 			}
 		}
-		slog.Info("rewriter: loaded rules", "path", path, "system", sysLoaded, "tool", toolLoaded, "disabled", skipped)
+		slog.Info("rewriter: loaded rules", "path", path, "system", sysLoaded, "tool", toolLoaded, "system-reminder", reminderLoaded, "disabled", skipped)
 	}
 
 	return s, nil
@@ -214,7 +231,7 @@ func (rw *Rewriter) Rewrite(body []byte) ([]byte, *Warnings) {
 	w := &Warnings{}
 	s := rw.state.Load()
 
-	if !s.hasSystemRules() && len(s.toolRules) == 0 {
+	if !s.hasSystemRules() && len(s.toolRules) == 0 && len(s.reminderRules) == 0 {
 		return body, w
 	}
 
@@ -240,6 +257,16 @@ func (rw *Rewriter) Rewrite(body []byte) ([]byte, *Warnings) {
 		if toolsRaw, ok := parsed["tools"]; ok {
 			if newTools, changed := rw.rewriteTools(s, toolsRaw, w); changed {
 				parsed["tools"] = newTools
+				modified = true
+			}
+		}
+	}
+
+	// Rewrite system-reminder blocks in user messages
+	if len(s.reminderRules) > 0 {
+		if msgsRaw, ok := parsed["messages"]; ok {
+			if newMsgs, changed := rw.rewriteReminders(s, msgsRaw, w); changed {
+				parsed["messages"] = newMsgs
 				modified = true
 			}
 		}
@@ -431,4 +458,124 @@ func (rw *Rewriter) rewriteTools(s *rewriterState, toolsRaw json.RawMessage, w *
 	}
 	slog.Info("rewriter: tool descriptions rewritten")
 	return newTools, true
+}
+
+// systemReminderRe matches <system-reminder>...</system-reminder> tags in message text.
+var rewriterReminderRe = regexp.MustCompile(`(?s)<system-reminder>\s*(.*?)\s*</system-reminder>`)
+
+func (rw *Rewriter) rewriteReminders(s *rewriterState, msgsRaw json.RawMessage, w *Warnings) (json.RawMessage, bool) {
+	var msgs []map[string]json.RawMessage
+	if err := json.Unmarshal(msgsRaw, &msgs); err != nil {
+		return nil, false
+	}
+
+	modified := false
+	for i, msg := range msgs {
+		roleRaw, ok := msg["role"]
+		if !ok {
+			continue
+		}
+		var role string
+		if err := json.Unmarshal(roleRaw, &role); err != nil || role != "user" {
+			continue
+		}
+
+		contentRaw, ok := msg["content"]
+		if !ok {
+			continue
+		}
+
+		var blocks []map[string]json.RawMessage
+		if err := json.Unmarshal(contentRaw, &blocks); err != nil {
+			continue
+		}
+
+		contentModified := false
+		for j, block := range blocks {
+			typeRaw, ok := block["type"]
+			if !ok {
+				continue
+			}
+			var blockType string
+			if err := json.Unmarshal(typeRaw, &blockType); err != nil || blockType != "text" {
+				continue
+			}
+
+			textRaw, ok := block["text"]
+			if !ok {
+				continue
+			}
+			var text string
+			if err := json.Unmarshal(textRaw, &text); err != nil {
+				continue
+			}
+
+			if !rewriterReminderRe.MatchString(text) {
+				continue
+			}
+
+			// Apply rules to the content inside each <system-reminder> block
+			newText := rewriterReminderRe.ReplaceAllStringFunc(text, func(match string) string {
+				inner := rewriterReminderRe.FindStringSubmatch(match)
+				if len(inner) < 2 {
+					return match
+				}
+				content := inner[1]
+
+				for _, r := range s.reminderRules {
+					r.seen.Add(1)
+					if r.re != nil {
+						if r.re.MatchString(content) {
+							content = r.re.ReplaceAllString(content, r.Replace)
+							r.matched.Add(1)
+						} else {
+							w.add("rewriter: system-reminder rule (regex) did not match", "rule", r.label())
+						}
+					} else {
+						if strings.Contains(content, r.Find) {
+							content = strings.ReplaceAll(content, r.Find, r.Replace)
+							r.matched.Add(1)
+						} else {
+							w.add("rewriter: system-reminder rule did not match", "rule", r.label())
+						}
+					}
+				}
+
+				// If content is empty after replacements, remove the entire block
+				if strings.TrimSpace(content) == "" {
+					return ""
+				}
+				return "<system-reminder>\n" + content + "\n</system-reminder>"
+			})
+
+			if newText != text {
+				newTextJSON, err := json.Marshal(newText)
+				if err != nil {
+					continue
+				}
+				blocks[j]["text"] = newTextJSON
+				contentModified = true
+			}
+		}
+
+		if contentModified {
+			newContent, err := json.Marshal(blocks)
+			if err != nil {
+				continue
+			}
+			msgs[i]["content"] = newContent
+			modified = true
+		}
+	}
+
+	if !modified {
+		return nil, false
+	}
+
+	newMsgs, err := json.Marshal(msgs)
+	if err != nil {
+		return nil, false
+	}
+	slog.Info("rewriter: system-reminder blocks rewritten")
+	return newMsgs, true
 }

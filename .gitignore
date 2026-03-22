@@ -1,3 +1,4 @@
 .claude/
 requests/
+systemreminder_logs/
 *replacements.local.yaml

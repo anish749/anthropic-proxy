@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"log/slog"
 	"regexp"
 )
 
@@ -25,6 +26,7 @@ func (SystemRemindersExtractor) Extract(body map[string]json.RawMessage) (json.R
 		Content json.RawMessage `json:"content"`
 	}
 	if err := json.Unmarshal(raw, &msgs); err != nil {
+		slog.Error("system-reminders: failed to parse messages", "err", err)
 		return nil, false
 	}
 
@@ -39,6 +41,7 @@ func (SystemRemindersExtractor) Extract(body map[string]json.RawMessage) (json.R
 			Text string `json:"text"`
 		}
 		if err := json.Unmarshal(msg.Content, &blocks); err != nil {
+			slog.Warn("system-reminders: failed to parse message content", "err", err)
 			continue
 		}
 
@@ -59,6 +62,7 @@ func (SystemRemindersExtractor) Extract(body map[string]json.RawMessage) (json.R
 
 	out, err := json.Marshal(reminders)
 	if err != nil {
+		slog.Error("system-reminders: failed to marshal output", "err", err)
 		return nil, false
 	}
 	return out, true

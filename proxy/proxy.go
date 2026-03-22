@@ -31,7 +31,7 @@ type Proxy struct {
 type Options struct {
 	LogRequests bool
 	SwapCreds   bool
-	LogFormat   string // "json", "yaml", or "markdown"
+	LogFormat   string // "json" or "yaml"
 }
 
 func New(opts Options) *Proxy {

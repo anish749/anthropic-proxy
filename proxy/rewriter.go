@@ -100,19 +100,50 @@ func (w *Warnings) Flush(reqID string) {
 	}
 }
 
-type Rewriter struct {
-	// fullReplace maps block index → replacement text
+// rewriterState holds the immutable rule set for a single load generation.
+// Swapped atomically so in-flight requests see a consistent snapshot.
+type rewriterState struct {
 	fullReplace map[int]string
-	// systemRules maps block index → list of find/replace rules
 	systemRules map[int][]*rule
-	// toolRules maps tool name → list of rules
-	toolRules map[string][]*rule
+	toolRules   map[string][]*rule
+}
 
+func (s *rewriterState) hasSystemRules() bool {
+	return len(s.fullReplace) > 0 || len(s.systemRules) > 0
+}
+
+func (s *rewriterState) allRules() []*rule {
+	var all []*rule
+	for _, rules := range s.systemRules {
+		all = append(all, rules...)
+	}
+	for _, rules := range s.toolRules {
+		all = append(all, rules...)
+	}
+	return all
+}
+
+type Rewriter struct {
+	state    atomic.Pointer[rewriterState]
+	dir      string
 	reqCount atomic.Int64
 }
 
 func NewRewriter(dir string) *Rewriter {
-	rw := &Rewriter{
+	rw := &Rewriter{dir: dir}
+	state, err := loadRules(dir)
+	if err != nil {
+		slog.Error("rewriter: "+err.Error())
+		os.Exit(1)
+	}
+	rw.state.Store(state)
+	return rw
+}
+
+// loadRules reads all prompt files from dir and returns an immutable rewriterState.
+// Returns an error for fatal parse failures; missing files are silently skipped.
+func loadRules(dir string) (*rewriterState, error) {
+	s := &rewriterState{
 		fullReplace: make(map[int]string),
 		systemRules: make(map[int][]*rule),
 		toolRules:   make(map[string][]*rule),
@@ -125,7 +156,7 @@ func NewRewriter(dir string) *Rewriter {
 		if err != nil {
 			continue
 		}
-		rw.fullReplace[i] = string(data)
+		s.fullReplace[i] = string(data)
 		slog.Info("rewriter: loaded full replacement", "block", i, "path", path)
 	}
 
@@ -138,8 +169,7 @@ func NewRewriter(dir string) *Rewriter {
 		}
 		var rules []replacementRule
 		if err := yaml.Unmarshal(data, &rules); err != nil {
-			slog.Error("rewriter: failed to parse file", "path", path, "err", err)
-			os.Exit(1)
+			return nil, fmt.Errorf("failed to parse %s: %w", path, err)
 		}
 
 		sysLoaded, toolLoaded, skipped := 0, 0, 0
@@ -150,7 +180,7 @@ func NewRewriter(dir string) *Rewriter {
 			}
 			switch r.Type {
 			case "system":
-				rw.systemRules[r.Block] = append(rw.systemRules[r.Block], &rule{
+				s.systemRules[r.Block] = append(s.systemRules[r.Block], &rule{
 					Block: r.Block, Find: r.Find, Replace: r.Replace,
 					WarnAfter: r.WarnAfter,
 				})
@@ -163,12 +193,11 @@ func NewRewriter(dir string) *Rewriter {
 				if r.Regex {
 					re, err := regexp.Compile(r.Find)
 					if err != nil {
-						slog.Error("rewriter: invalid regex in rule", "tool", r.Tool, "err", err)
-						os.Exit(1)
+						return nil, fmt.Errorf("invalid regex in rule (tool %s): %w", r.Tool, err)
 					}
 					tr.re = re
 				}
-				rw.toolRules[r.Tool] = append(rw.toolRules[r.Tool], tr)
+				s.toolRules[r.Tool] = append(s.toolRules[r.Tool], tr)
 				toolLoaded++
 			default:
 				slog.Warn("rewriter: unknown rule type, skipping", "type", r.Type, "path", path)
@@ -177,17 +206,15 @@ func NewRewriter(dir string) *Rewriter {
 		slog.Info("rewriter: loaded rules", "path", path, "system", sysLoaded, "tool", toolLoaded, "disabled", skipped)
 	}
 
-	return rw
+	return s, nil
 }
 
-func (rw *Rewriter) hasSystemRules() bool {
-	return len(rw.fullReplace) > 0 || len(rw.systemRules) > 0
-}
 
 func (rw *Rewriter) Rewrite(body []byte) ([]byte, *Warnings) {
 	w := &Warnings{}
+	s := rw.state.Load()
 
-	if !rw.hasSystemRules() && len(rw.toolRules) == 0 {
+	if !s.hasSystemRules() && len(s.toolRules) == 0 {
 		return body, w
 	}
 
@@ -199,9 +226,9 @@ func (rw *Rewriter) Rewrite(body []byte) ([]byte, *Warnings) {
 	modified := false
 
 	// Rewrite system prompt blocks
-	if rw.hasSystemRules() {
+	if s.hasSystemRules() {
 		if systemRaw, ok := parsed["system"]; ok {
-			if newSystem, changed := rw.rewriteSystem(systemRaw, w); changed {
+			if newSystem, changed := rw.rewriteSystem(s, systemRaw, w); changed {
 				parsed["system"] = newSystem
 				modified = true
 			}
@@ -209,9 +236,9 @@ func (rw *Rewriter) Rewrite(body []byte) ([]byte, *Warnings) {
 	}
 
 	// Rewrite tool descriptions
-	if len(rw.toolRules) > 0 {
+	if len(s.toolRules) > 0 {
 		if toolsRaw, ok := parsed["tools"]; ok {
-			if newTools, changed := rw.rewriteTools(toolsRaw, w); changed {
+			if newTools, changed := rw.rewriteTools(s, toolsRaw, w); changed {
 				parsed["tools"] = newTools
 				modified = true
 			}
@@ -230,27 +257,15 @@ func (rw *Rewriter) Rewrite(body []byte) ([]byte, *Warnings) {
 	slog.Info("rewriter: request rewritten")
 
 	n := rw.reqCount.Add(1)
-	rw.checkStats(n)
+	rw.checkStats(s, n)
 
 	return newBody, w
 }
 
-// allRules returns every rule across both system and tool maps.
-func (rw *Rewriter) allRules() []*rule {
-	var all []*rule
-	for _, rules := range rw.systemRules {
-		all = append(all, rules...)
-	}
-	for _, rules := range rw.toolRules {
-		all = append(all, rules...)
-	}
-	return all
-}
-
 // checkStats logs a stats summary every statsLogInterval requests, and warns
 // immediately about any rule that has never matched despite enough evaluations.
-func (rw *Rewriter) checkStats(reqCount int64) {
-	all := rw.allRules()
+func (rw *Rewriter) checkStats(s *rewriterState, reqCount int64) {
+	all := s.allRules()
 
 	// Per-request: warn about zero-match rules that have crossed their threshold.
 	for _, r := range all {
@@ -290,7 +305,7 @@ func (rw *Rewriter) checkStats(reqCount int64) {
 	}
 }
 
-func (rw *Rewriter) rewriteSystem(systemRaw json.RawMessage, w *Warnings) (json.RawMessage, bool) {
+func (rw *Rewriter) rewriteSystem(s *rewriterState, systemRaw json.RawMessage, w *Warnings) (json.RawMessage, bool) {
 	var blocks []map[string]json.RawMessage
 	if err := json.Unmarshal(systemRaw, &blocks); err != nil {
 		return nil, false
@@ -308,10 +323,10 @@ func (rw *Rewriter) rewriteSystem(systemRaw json.RawMessage, w *Warnings) (json.
 		}
 
 		// Full replacement takes precedence
-		if replacement, ok := rw.fullReplace[i]; ok {
+		if replacement, ok := s.fullReplace[i]; ok {
 			text = replacement
 			modified = true
-		} else if rules, ok := rw.systemRules[i]; ok {
+		} else if rules, ok := s.systemRules[i]; ok {
 			for _, r := range rules {
 				r.seen.Add(1)
 				if strings.Contains(text, r.Find) {
@@ -345,7 +360,7 @@ func (rw *Rewriter) rewriteSystem(systemRaw json.RawMessage, w *Warnings) (json.
 	return newSystem, true
 }
 
-func (rw *Rewriter) rewriteTools(toolsRaw json.RawMessage, w *Warnings) (json.RawMessage, bool) {
+func (rw *Rewriter) rewriteTools(s *rewriterState, toolsRaw json.RawMessage, w *Warnings) (json.RawMessage, bool) {
 	var tools []map[string]json.RawMessage
 	if err := json.Unmarshal(toolsRaw, &tools); err != nil {
 		return nil, false
@@ -362,7 +377,7 @@ func (rw *Rewriter) rewriteTools(toolsRaw json.RawMessage, w *Warnings) (json.Ra
 			continue
 		}
 
-		rules, ok := rw.toolRules[name]
+		rules, ok := s.toolRules[name]
 		if !ok {
 			continue
 		}

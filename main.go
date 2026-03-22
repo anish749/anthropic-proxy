@@ -23,8 +23,8 @@ func main() {
 	switch os.Args[1] {
 	case "login":
 		runLogin()
-	case "extract-reminders":
-		runExtractReminders()
+	case "system-reminders":
+		runSystemReminders()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		printUsage()
@@ -36,7 +36,7 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "\nUsage: anthropic-proxy [command]\n\n")
 	fmt.Fprintf(os.Stderr, "Commands:\n")
 	fmt.Fprintf(os.Stderr, "  login               Log in via Anthropic OAuth\n")
-	fmt.Fprintf(os.Stderr, "  extract-reminders   Extract system reminders from logged requests\n")
+	fmt.Fprintf(os.Stderr, "  system-reminders    Extract system reminders from logged requests\n")
 	fmt.Fprintf(os.Stderr, "\nRun without a command to start the proxy server.\n")
 	fmt.Fprintf(os.Stderr, "\nProxy flags:\n")
 	fmt.Fprintf(os.Stderr, "  -port int       port to listen on (default 8080)\n")
@@ -83,14 +83,14 @@ func runLogin() {
 	}
 }
 
-func runExtractReminders() {
-	fs := flag.NewFlagSet("extract-reminders", flag.ExitOnError)
+func runSystemReminders() {
+	fs := flag.NewFlagSet("system-reminders", flag.ExitOnError)
 	requestsDir := fs.String("requests", "requests", "directory containing logged request files")
-	outputDir := fs.String("output", "systemreminder_logs", "directory to write extracted reminders")
+	outputDir := fs.String("output", "systemreminder_logs", "directory to write extracted system reminders")
 	fs.Parse(os.Args[2:])
 
 	if err := systemreminders.Run(*requestsDir, *outputDir); err != nil {
-		slog.Error("extract-reminders failed", "err", err)
+		slog.Error("system-reminders failed", "err", err)
 		os.Exit(1)
 	}
 }

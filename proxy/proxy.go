@@ -58,6 +58,11 @@ func New(opts Options) *Proxy {
 	return p
 }
 
+// WatchPrompts starts hot-reloading of prompt files in the background.
+func (p *Proxy) WatchPrompts() {
+	p.rewriter.Watch()
+}
+
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	targetURL := targetBase + r.URL.Path
 	if r.URL.RawQuery != "" {

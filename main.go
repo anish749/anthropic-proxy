@@ -31,6 +31,7 @@ func main() {
 		LogRequests: *logRequests,
 		SwapCreds:   *swapCreds,
 	})
+	p.WatchPrompts()
 
 	slog.Info("anthropic-proxy listening", "addr", "http://localhost"+addr)
 	slog.Info("forwarding to https://api.anthropic.com")

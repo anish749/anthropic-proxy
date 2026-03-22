@@ -1,11 +1,31 @@
 # anthropic-proxy
 
-A local HTTP proxy that sits between Claude Code and the Anthropic API. It rewrites the system prompt before forwarding — letting you swap in custom personalities, tone, or style instructions.
+A local HTTP proxy that sits between Claude Code and the Anthropic API. It rewrites the system prompt and tool descriptions before forwarding — letting you swap in custom personalities, tone, style instructions, or patch tool behavior.
+
+## Install
+
+```bash
+curl -sL https://raw.githubusercontent.com/anish749/anthropic-proxy/main/install.sh | bash
+```
+
+This downloads the latest release and installs to `~/.local/bin/anthropic-proxy`. Override the install directory with `INSTALL_DIR`:
+
+```bash
+curl -sL https://raw.githubusercontent.com/anish749/anthropic-proxy/main/install.sh | INSTALL_DIR=/usr/local/bin bash
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/anish749/anthropic-proxy.git
+cd anthropic-proxy
+go build -ldflags="-s -w" -o anthropic-proxy .
+```
 
 ## Usage
 
 ```sh
-go run . -port 8080
+anthropic-proxy -port 8080
 ```
 
 Then start Claude Code pointing at the proxy:
@@ -14,6 +34,12 @@ Then start Claude Code pointing at the proxy:
 ANTHROPIC_BASE_URL=http://localhost:8080 claude
 ```
 
+### Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-port` | `8080` | Port to listen on |
+| `-log` | `false` | Log every request to the `requests/` directory |
 ## Rewriting rules
 
 All `*.yaml` files in `prompts/` are loaded and merged at startup. Every rule uses the same schema with a `type` field to distinguish between system prompt and tool description replacements. You can organize rules across as many files as you like — split by concern, keep everything in one file, whatever works for you.
@@ -30,7 +56,7 @@ Files matching `*replacements.local.yaml` are gitignored for local overrides.
   replace: "replacement"
   regex: false          # tool: treat find as a regex (default: false)
   disabled: false       # skip this rule (default: false)
-  warn_after: 5         # tool: warn if unmatched after N evals (default: never)
+  warn_after: 5         # warn if unmatched after N evals (default: never)
 ```
 
 ### System prompt rules (`type: system`)
@@ -81,14 +107,14 @@ Blocks 0 and 1 are generally left unchanged. Blocks 2 and 3 are where personalit
 
 ### Diagnostics
 
-Unmatched find strings log a warning. Tool rules track match stats and log a summary every 50 requests. Invalid YAML is a fatal startup error.
+Unmatched find strings log a warning correlated with the upstream `Request-Id`. Tool rules track match stats and log a summary every 50 requests. Invalid YAML is a fatal startup error.
 
 ## Request logging
 
 Opt-in with the `-log` flag:
 
 ```sh
-go run . -port 8080 -log
+anthropic-proxy -port 8080 -log
 ```
 
 Each API call creates files in `requests/` named `{timestamp}-{request-id}-{model}-{part}.json`:
@@ -97,3 +123,5 @@ Each API call creates files in `requests/` named `{timestamp}-{request-id}-{mode
 - `messages.json` — conversation messages
 - `system.json` — system prompt
 - `usage.json` — token usage from the response
+
+Without `-log`, requests are still logged automatically when rewrite rules produce warnings, for debugging.

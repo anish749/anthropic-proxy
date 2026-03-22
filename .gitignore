@@ -1,3 +1,4 @@
 .claude/
 requests/
+dist/
 *replacements.local.yaml

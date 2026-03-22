@@ -25,7 +25,7 @@ go build -ldflags="-s -w" -o anthropic-proxy .
 ## Usage
 
 ```sh
-anthropic-proxy -port 8080
+anthropic-proxy --port 8080
 ```
 
 Then start Claude Code pointing at the proxy:
@@ -34,12 +34,23 @@ Then start Claude Code pointing at the proxy:
 ANTHROPIC_BASE_URL=http://localhost:8080 claude
 ```
 
-### Flags
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| *(default)* | Start the proxy server |
+| `login` | Log in via Anthropic OAuth |
+| `system-reminders` | Extract system reminders from logged requests |
+
+Run `anthropic-proxy --help` or `anthropic-proxy <command> --help` for details.
+
+### Proxy flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-port` | `8080` | Port to listen on |
-| `-log` | `false` | Log every request to the `requests/` directory |
+| `--port` | `8080` | Port to listen on |
+| `--log` | `false` | Log every request to the `requests/` directory |
+| `--swap-creds` | `false` | Replace client credentials with logged-in OAuth token |
 ## Rewriting rules
 
 All `*.yaml` files in `prompts/` are loaded and merged at startup. Every rule uses the same schema with a `type` field to distinguish between system prompt and tool description replacements. You can organize rules across as many files as you like — split by concern, keep everything in one file, whatever works for you.
@@ -111,10 +122,10 @@ Unmatched find strings log a warning correlated with the upstream `Request-Id`. 
 
 ## Request logging
 
-Opt-in with the `-log` flag:
+Opt-in with the `--log` flag:
 
 ```sh
-anthropic-proxy -port 8080 -log
+anthropic-proxy --port 8080 --log
 ```
 
 Each API call creates files in `requests/` named `{timestamp}-{request-id}-{model}-{part}.json`:
@@ -124,4 +135,21 @@ Each API call creates files in `requests/` named `{timestamp}-{request-id}-{mode
 - `system.json` — system prompt
 - `usage.json` — token usage from the response
 
-Without `-log`, requests are still logged automatically when rewrite rules produce warnings, for debugging.
+Without `--log`, requests are still logged automatically when rewrite rules produce warnings, for debugging.
+
+## OAuth login
+
+To use the proxy with credential swapping (replacing your client's API key with an OAuth token):
+
+```sh
+anthropic-proxy login
+anthropic-proxy --swap-creds
+```
+
+## System reminders extraction
+
+Extract unique `<system-reminder>` blocks from previously logged requests:
+
+```sh
+anthropic-proxy system-reminders --requests requests --output systemreminder_logs
+```

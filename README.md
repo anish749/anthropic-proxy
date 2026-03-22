@@ -49,6 +49,7 @@ Run `anthropic-proxy --help` or `anthropic-proxy <command> --help` for details.
 |------|---------|-------------|
 | `--port` | `8080` | Port to listen on |
 | `--log` | `false` | Log every request to the `requests/` directory |
+| `--log-format` | `json` | Output format for logged requests (`json`, `yaml`) |
 | `--swap-creds` | `false` | Replace client credentials with logged-in OAuth token |
 ## Rewriting rules
 

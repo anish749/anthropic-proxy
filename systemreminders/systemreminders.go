@@ -74,16 +74,15 @@ func Run(requestsDir, outputDir string) error {
 					continue
 				}
 
-				matches := systemReminderRe.FindAllStringSubmatch(block.Text, -1)
-				for _, m := range matches {
-					body := strings.TrimSpace(m[1])
-					hash := fmt.Sprintf("%x", sha256.Sum256([]byte(body)))[:12]
+				matches := systemReminderRe.FindAllString(block.Text, -1)
+				for _, match := range matches {
+					hash := fmt.Sprintf("%x", sha256.Sum256([]byte(match)))[:12]
 
 					if r, ok := seen[hash]; ok {
 						r.sources = append(r.sources, entry.Name())
 					} else {
 						seen[hash] = &reminder{
-							text:        body,
+							text:        match,
 							firstSource: entry.Name(),
 							sources:     []string{entry.Name()},
 						}
@@ -114,9 +113,8 @@ func Run(requestsDir, outputDir string) error {
 			fmt.Fprintf(&buf, "  - %s\n", src)
 		}
 		buf.WriteString("---\n\n")
-		buf.WriteString("<system-reminder>\n")
 		buf.WriteString(r.text)
-		buf.WriteString("\n</system-reminder>\n")
+		buf.WriteString("\n")
 
 		if err := os.WriteFile(path, []byte(buf.String()), 0o644); err != nil {
 			return fmt.Errorf("failed to write %s: %w", path, err)

@@ -40,7 +40,6 @@ ANTHROPIC_BASE_URL=http://localhost:8080 claude
 |---------|-------------|
 | *(default)* | Start the proxy server |
 | `login` | Log in via Anthropic OAuth |
-| `system-reminders` | Extract system reminders from logged requests |
 
 Run `anthropic-proxy --help` or `anthropic-proxy <command> --help` for details.
 
@@ -133,6 +132,7 @@ Each API call creates files in `requests/` named `{timestamp}-{request-id}-{mode
 - `tools.json` — tool definitions
 - `messages.json` — conversation messages
 - `system.json` — system prompt
+- `system-reminders.json` — `<system-reminder>` blocks extracted from user messages (if any)
 - `usage.json` — token usage from the response
 
 Without `--log`, requests are still logged automatically when rewrite rules produce warnings, for debugging.
@@ -146,10 +146,3 @@ anthropic-proxy login
 anthropic-proxy --swap-creds
 ```
 
-## System reminders extraction
-
-Extract unique `<system-reminder>` blocks from previously logged requests:
-
-```sh
-anthropic-proxy system-reminders --requests requests --output systemreminder_logs
-```

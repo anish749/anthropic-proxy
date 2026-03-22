@@ -1,4 +1,4 @@
 .claude/
+anthropic-proxy
 requests/
-systemreminder_logs/
 *replacements.local.yaml

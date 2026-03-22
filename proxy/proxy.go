@@ -42,7 +42,7 @@ func New(opts Options) *Proxy {
 		client:   &http.Client{},
 		rewriter: NewRewriter("prompts"),
 		fileLogger: NewFileLogger("requests",
-			[]Extractor{ToolsExtractor{}, MessagesExtractor{}, SystemExtractor{}},
+			[]Extractor{ToolsExtractor{}, MessagesExtractor{}, SystemExtractor{}, SystemRemindersExtractor{}},
 			[]Extractor{UsageExtractor{}},
 		),
 		logLevel: logLevel,

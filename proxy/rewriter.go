@@ -509,11 +509,23 @@ func (rw *Rewriter) rewriteReminders(s *rewriterState, msgsRaw json.RawMessage, 
 				continue
 			}
 			var blockType string
-			if err := json.Unmarshal(typeRaw, &blockType); err != nil || blockType != "text" {
+			if err := json.Unmarshal(typeRaw, &blockType); err != nil {
 				continue
 			}
 
-			textRaw, ok := block["text"]
+			// Determine which field holds the text: "text" for text blocks,
+			// "content" for tool_result blocks (which can contain system-reminders).
+			var textField string
+			switch blockType {
+			case "text":
+				textField = "text"
+			case "tool_result":
+				textField = "content"
+			default:
+				continue
+			}
+
+			textRaw, ok := block[textField]
 			if !ok {
 				continue
 			}
@@ -572,7 +584,7 @@ func (rw *Rewriter) rewriteReminders(s *rewriterState, msgsRaw json.RawMessage, 
 				if err != nil {
 					continue
 				}
-				blocks[j]["text"] = newTextJSON
+				blocks[j][textField] = newTextJSON
 				contentModified = true
 			}
 		}

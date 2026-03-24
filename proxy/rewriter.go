@@ -135,6 +135,7 @@ type Rewriter struct {
 	state    atomic.Pointer[rewriterState]
 	dir      string
 	reqCount atomic.Int64
+	planMode *PlanModeRewriter
 }
 
 func NewRewriter(dir string) *Rewriter {
@@ -145,6 +146,7 @@ func NewRewriter(dir string) *Rewriter {
 		os.Exit(1)
 	}
 	rw.state.Store(state)
+	rw.planMode = NewPlanModeRewriter(filepath.Join(dir, "plan-mode.txt"))
 	return rw
 }
 
@@ -231,7 +233,7 @@ func (rw *Rewriter) Rewrite(body []byte) ([]byte, *Warnings) {
 	w := &Warnings{}
 	s := rw.state.Load()
 
-	if !s.hasSystemRules() && len(s.toolRules) == 0 && len(s.reminderRules) == 0 {
+	if !s.hasSystemRules() && len(s.toolRules) == 0 && len(s.reminderRules) == 0 && rw.planMode == nil {
 		return body, w
 	}
 
@@ -262,8 +264,8 @@ func (rw *Rewriter) Rewrite(body []byte) ([]byte, *Warnings) {
 		}
 	}
 
-	// Rewrite system-reminder blocks in user messages
-	if len(s.reminderRules) > 0 {
+	// Rewrite system-reminder blocks in user messages (plan mode + regular rules)
+	if len(s.reminderRules) > 0 || rw.planMode != nil {
 		if msgsRaw, ok := parsed["messages"]; ok {
 			if newMsgs, changed := rw.rewriteReminders(s, msgsRaw, w); changed {
 				parsed["messages"] = newMsgs
@@ -485,11 +487,21 @@ func (rw *Rewriter) rewriteReminders(s *rewriterState, msgsRaw json.RawMessage, 
 			continue
 		}
 
+		// Content can be a string or an array of blocks.
+		// Try string first, wrap in a single-element array for uniform handling.
 		var blocks []map[string]json.RawMessage
-		if err := json.Unmarshal(contentRaw, &blocks); err != nil {
+		var plainStr string
+		if err := json.Unmarshal(contentRaw, &plainStr); err == nil {
+			textJSON, _ := json.Marshal(plainStr)
+			typeJSON, _ := json.Marshal("text")
+			blocks = []map[string]json.RawMessage{
+				{"type": typeJSON, "text": textJSON},
+			}
+		} else if err := json.Unmarshal(contentRaw, &blocks); err != nil {
 			continue
 		}
 
+		isStringContent := plainStr != ""
 		contentModified := false
 		for j, block := range blocks {
 			typeRaw, ok := block["type"]
@@ -521,6 +533,13 @@ func (rw *Rewriter) rewriteReminders(s *rewriterState, msgsRaw json.RawMessage, 
 					return match
 				}
 				content := inner[1]
+
+				// Plan mode: full replacement of plan mode reminders
+				if rw.planMode != nil {
+					if replacement, ok := rw.planMode.Rewrite(content); ok {
+						return "<system-reminder>\n" + replacement + "\n</system-reminder>"
+					}
+				}
 
 				for _, r := range s.reminderRules {
 					r.seen.Add(1)
@@ -559,7 +578,16 @@ func (rw *Rewriter) rewriteReminders(s *rewriterState, msgsRaw json.RawMessage, 
 		}
 
 		if contentModified {
-			newContent, err := json.Marshal(blocks)
+			var newContent json.RawMessage
+			var err error
+			if isStringContent {
+				// Preserve original string format
+				var text string
+				json.Unmarshal(blocks[0]["text"], &text)
+				newContent, err = json.Marshal(text)
+			} else {
+				newContent, err = json.Marshal(blocks)
+			}
 			if err != nil {
 				continue
 			}

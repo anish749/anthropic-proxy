@@ -26,7 +26,7 @@ func NewFileLogger(dir string, format string, reqExtractors []Extractor, respExt
 	return &FileLogger{dir: dir, format: format, reqExtractors: reqExtractors, respExtractors: respExtractors}
 }
 
-func (fl *FileLogger) Log(requestID string, reqBody, respBody []byte) {
+func (fl *FileLogger) Log(requestID string, reqBody, rewrittenBody, respBody []byte) {
 	var parsedReq map[string]json.RawMessage
 	if err := json.Unmarshal(reqBody, &parsedReq); err != nil {
 		return
@@ -43,6 +43,14 @@ func (fl *FileLogger) Log(requestID string, reqBody, respBody []byte) {
 
 	fl.writeExtracted(prefix, parsedReq, fl.reqExtractors)
 	fl.writeExtractedRaw(prefix, respBody, fl.respExtractors)
+
+	if !bytes.Equal(reqBody, rewrittenBody) {
+		var parsedRewritten map[string]json.RawMessage
+		if err := json.Unmarshal(rewrittenBody, &parsedRewritten); err == nil {
+			rewrittenPrefix := prefix + "-rewritten"
+			fl.writeExtracted(rewrittenPrefix, parsedRewritten, fl.reqExtractors)
+		}
+	}
 
 	slog.Info("logged request", "id", requestID, "model", model)
 }

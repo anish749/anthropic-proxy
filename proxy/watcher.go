@@ -47,6 +47,11 @@ func (rw *Rewriter) Watch() {
 					}
 					rw.state.Store(state)
 					rw.reqCount.Store(0)
+					if rw.planMode != nil {
+						if err := rw.planMode.Reload(); err != nil {
+							slog.Error("rewriter: plan mode template reload failed", "err", err)
+						}
+					}
 					slog.Info("rewriter: rules reloaded successfully")
 				})
 			case err, ok := <-watcher.Errors:

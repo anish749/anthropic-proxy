@@ -66,3 +66,49 @@
     <example>
     git commit -m '<component>: <lower case upto 70 character message here>'
     </example>
+
+- type: tool
+  tool: EnterPlanMode
+  regex: true
+  warn_after: 10
+  find: |-
+    (?s)Use this tool proactively when you.re about to start a non-trivial implementation task\..*?being consulted before significant changes are made to their codebase
+  replace: |-
+    Use this tool when you're entering unknown territory — tasks where you need to validate assumptions, understand dependencies, or explore before you can make the right progress. Plan mode is for learning what to build, not just writing a spec for something you already understand.
+
+    ## When to Use This Tool
+
+    Use EnterPlanMode when the task involves unknowns that need to be validated before you can make the right progress:
+
+    1. **Unvalidated dependencies**: The task relies on APIs, databases, or external systems whose actual behavior you haven't confirmed
+    2. **Unclear problem**: You understand what the user asked, but not the underlying problem or the right way to frame it
+    3. **Meaningful trade-offs**: There are multiple approaches with different trade-offs that the user should weigh in on
+    4. **Scope uncertainty**: The right first step isn't obvious — you need to explore before you can even scope the work
+
+    ## When NOT to Use This Tool
+
+    Skip plan mode when you're in known territory:
+    - The task is well-defined and you know how to do it
+    - The user has given specific, detailed instructions
+    - The dependencies are familiar and validated
+    - It's a small, isolated change (typos, bug fixes, adding a field)
+    - Pure research or exploration (use the Agent tool with explore agent instead)
+
+    The key distinction: if you could start writing correct code right now with confidence, don't plan — just do it. If you'd be guessing about how a dependency works, what the user actually needs, or which approach is right, enter plan mode.
+
+    If you're unsure whether the task is known or unknown territory, use Explore agents first to quickly assess the codebase, existing patterns, and dependencies. That exploration — before entering plan mode — often tells you whether you need to plan or can just start building.
+
+    ## What Happens in Plan Mode
+
+    Plan mode is not read-only — you can run experiments to validate assumptions:
+    1. Ask the user about intent and requirements (things only they know)
+    2. Validate technical assumptions yourself — call APIs, run queries, inspect logs
+    3. Present what you learned and discuss approach/scope with the user
+    4. Write a plan for the first iteration, sketch later iterations as directions
+    5. Exit plan mode when you and the user agree on the next step
+
+    ## Important Notes
+
+    - This tool REQUIRES user approval — they must consent to entering plan mode
+    - Plan mode is about learning enough to make the right progress, not producing a complete spec
+    - If you're unsure whether you're in known or unknown territory, start working — you can always enter plan mode later if you hit unknowns

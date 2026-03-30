@@ -48,21 +48,29 @@ func (SystemRemindersExtractor) Extract(body map[string]json.RawMessage) (json.R
 			continue
 		}
 
-		var blocks []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal(msg.Content, &blocks); err != nil {
-			slog.Warn("system-reminders: failed to parse message content", "err", err)
-			userMsgIdx++
-			continue
-		}
-
-		for _, block := range blocks {
-			if block.Type != "text" {
+		// Content can be a string or an array of blocks
+		var texts []string
+		var plainStr string
+		if err := json.Unmarshal(msg.Content, &plainStr); err == nil {
+			texts = append(texts, plainStr)
+		} else {
+			var blocks []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			}
+			if err := json.Unmarshal(msg.Content, &blocks); err != nil {
+				userMsgIdx++
 				continue
 			}
-			matches := systemReminderRe.FindAllString(block.Text, -1)
+			for _, block := range blocks {
+				if block.Type == "text" {
+					texts = append(texts, block.Text)
+				}
+			}
+		}
+
+		for _, text := range texts {
+			matches := systemReminderRe.FindAllString(text, -1)
 			for _, match := range matches {
 				reminders = append(reminders, systemReminder{
 					MessageIndex:     i,

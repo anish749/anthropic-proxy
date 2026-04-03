@@ -17,6 +17,33 @@ type systemReminder struct {
 	Text             string `json:"text"`                // full text including <system-reminder> tags
 }
 
+// parseContentTexts extracts text strings from a message content field,
+// handling both the string form ("content": "hello") and the content-block
+// array form ("content": [{"type":"text","text":"hello"}]).
+func parseContentTexts(raw json.RawMessage) []string {
+	// Try plain string first.
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return []string{s}
+	}
+	// Otherwise treat as array of content blocks.
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		slog.Warn("system-reminders: failed to parse message content", "err", err)
+		return nil
+	}
+	var texts []string
+	for _, b := range blocks {
+		if b.Type == "text" {
+			texts = append(texts, b.Text)
+		}
+	}
+	return texts
+}
+
 // SystemRemindersExtractor extracts <system-reminder> blocks from user messages.
 type SystemRemindersExtractor struct{}
 
@@ -48,21 +75,10 @@ func (SystemRemindersExtractor) Extract(body map[string]json.RawMessage) (json.R
 			continue
 		}
 
-		var blocks []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal(msg.Content, &blocks); err != nil {
-			slog.Warn("system-reminders: failed to parse message content", "err", err)
-			userMsgIdx++
-			continue
-		}
+		texts := parseContentTexts(msg.Content)
 
-		for _, block := range blocks {
-			if block.Type != "text" {
-				continue
-			}
-			matches := systemReminderRe.FindAllString(block.Text, -1)
+		for _, text := range texts {
+			matches := systemReminderRe.FindAllString(text, -1)
 			for _, match := range matches {
 				reminders = append(reminders, systemReminder{
 					MessageIndex:     i,

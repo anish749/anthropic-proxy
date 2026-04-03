@@ -1,4 +1,4 @@
-.claude/
+.claude/settings.local.json
 anthropic-proxy
 requests/
 *replacements.local.yaml

@@ -6,29 +6,10 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/anish/anthropic-proxy/internal/selfupdate"
 	"github.com/anish/anthropic-proxy/proxy"
 	"github.com/spf13/cobra"
 )
-
-// version holds the build version, set via SetVersion from main.
-var version = "dev"
-
-// SetVersion is called from main to inject the build-time version.
-func SetVersion(v string) {
-	version = v
-}
-
-var rootCmd = &cobra.Command{
-	Use:   "anthropic-proxy [flags]",
-	Short: "An HTTP proxy for the Anthropic API",
-	Long: `anthropic-proxy sits between Claude Code and the Anthropic API,
-enabling request logging, prompt rewriting, and credential swapping.
-
-Run without a subcommand to start the proxy server.`,
-	RunE:          runServe,
-	SilenceUsage:  true,
-	SilenceErrors: true,
-}
 
 var (
 	port      int
@@ -37,22 +18,41 @@ var (
 	logFormat string
 )
 
-func init() {
-	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
-		proxy.SetupLogger()
-		// Silent background update check (never blocks).
-		go checkForUpdateSilently()
+func newRootCmd(version string) *cobra.Command {
+	root := &cobra.Command{
+		Use:   "anthropic-proxy [flags]",
+		Short: "An HTTP proxy for the Anthropic API",
+		Long: `anthropic-proxy sits between Claude Code and the Anthropic API,
+enabling request logging, prompt rewriting, and credential swapping.
+
+Run without a subcommand to start the proxy server.`,
+		Version:       version,
+		RunE:          runServe,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			proxy.SetupLogger()
+			selfupdate.AutoCheck(version)
+		},
 	}
 
-	rootCmd.Flags().IntVar(&port, "port", 8080, "port to listen on")
-	rootCmd.Flags().BoolVar(&logReqs, "log", false, "log requests to the requests/ directory")
-	rootCmd.Flags().BoolVar(&swapCreds, "swap-creds", false, "replace client credentials with logged-in OAuth token")
-	rootCmd.Flags().StringVar(&logFormat, "log-format", "yaml", "output format for logged requests (json, yaml)")
+	root.Flags().IntVar(&port, "port", 8080, "port to listen on")
+	root.Flags().BoolVar(&logReqs, "log", false, "log requests to the requests/ directory")
+	root.Flags().BoolVar(&swapCreds, "swap-creds", false, "replace client credentials with logged-in OAuth token")
+	root.Flags().StringVar(&logFormat, "log-format", "yaml", "output format for logged requests (json, yaml)")
+
+	root.AddCommand(
+		newLoginCmd(),
+		newVersionCmd(version),
+		newUpdateCmd(version),
+	)
+
+	return root
 }
 
 // Execute runs the root command.
-func Execute() {
-	if err := rootCmd.Execute(); err != nil {
+func Execute(version string) {
+	if err := newRootCmd(version).Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

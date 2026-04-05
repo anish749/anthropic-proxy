@@ -6,6 +6,5 @@ import "github.com/anish/anthropic-proxy/cmd"
 var version = "dev"
 
 func main() {
-	cmd.SetVersion(version)
-	cmd.Execute()
+	cmd.Execute(version)
 }

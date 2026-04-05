@@ -4,7 +4,7 @@ builds:
   - main: .
     binary: anthropic-proxy
     ldflags:
-      - -s -w
+      - -s -w -X main.version={{.Version}}
     goos:
       - darwin
       - linux

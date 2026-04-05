@@ -10,6 +10,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// version holds the build version, set via SetVersion from main.
+var version = "dev"
+
+// SetVersion is called from main to inject the build-time version.
+func SetVersion(v string) {
+	version = v
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "anthropic-proxy [flags]",
 	Short: "An HTTP proxy for the Anthropic API",
@@ -32,6 +40,8 @@ var (
 func init() {
 	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
 		proxy.SetupLogger()
+		// Silent background update check (never blocks).
+		go checkForUpdateSilently()
 	}
 
 	rootCmd.Flags().IntVar(&port, "port", 8080, "port to listen on")

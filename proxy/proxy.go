@@ -134,7 +134,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		(p.logLevel >= LogAll || warnings.HasWarnings())
 	if shouldLog {
 		if reqID != "" {
-			p.fileLogger.Log(reqID, reqBody, rewrittenBody, respBody)
+			p.fileLogger.Log(reqID, r, reqBody, rewrittenBody, respBody)
 		} else {
 			slog.Error("filelogger: missing Request-Id header, skipping log")
 		}

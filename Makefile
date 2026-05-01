@@ -1,7 +1,7 @@
-.PHONY: build dev
+.PHONY: build run
 
 build:
 	go build -o anthropic-proxy .
 
-dev: build
+run: build
 	./anthropic-proxy $(ARGS)

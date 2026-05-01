@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -26,7 +28,7 @@ func NewFileLogger(dir string, format string, reqExtractors []Extractor, respExt
 	return &FileLogger{dir: dir, format: format, reqExtractors: reqExtractors, respExtractors: respExtractors}
 }
 
-func (fl *FileLogger) Log(requestID string, reqBody, rewrittenBody, respBody []byte) {
+func (fl *FileLogger) Log(requestID string, r *http.Request, reqBody, rewrittenBody, respBody []byte) {
 	var parsedReq map[string]json.RawMessage
 	if err := json.Unmarshal(reqBody, &parsedReq); err != nil {
 		return
@@ -41,6 +43,8 @@ func (fl *FileLogger) Log(requestID string, reqBody, rewrittenBody, respBody []b
 	ts := time.Now().UTC().Format("20060102-150405")
 	prefix := fmt.Sprintf("%s-%s-%s", ts, requestID, model)
 
+	fl.writeCompleteRequest(prefix, r, reqBody)
+
 	fl.writeExtracted(prefix, parsedReq, fl.reqExtractors)
 	fl.writeExtractedRaw(prefix, respBody, fl.respExtractors)
 
@@ -48,11 +52,49 @@ func (fl *FileLogger) Log(requestID string, reqBody, rewrittenBody, respBody []b
 		var parsedRewritten map[string]json.RawMessage
 		if err := json.Unmarshal(rewrittenBody, &parsedRewritten); err == nil {
 			rewrittenPrefix := prefix + "-rewritten"
+			fl.writeCompleteRequest(rewrittenPrefix, r, rewrittenBody)
 			fl.writeExtracted(rewrittenPrefix, parsedRewritten, fl.reqExtractors)
 		}
 	}
 
 	slog.Info("logged request", "id", requestID, "model", model)
+}
+
+// writeCompleteRequest writes the full HTTP request (method, path, headers, body) to a single file.
+func (fl *FileLogger) writeCompleteRequest(prefix string, r *http.Request, body []byte) {
+	headers := make(map[string]any, len(r.Header))
+	keys := make([]string, 0, len(r.Header))
+	for k := range r.Header {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		vals := r.Header[k]
+		if len(vals) == 1 {
+			headers[k] = vals[0]
+		} else {
+			headers[k] = vals
+		}
+	}
+
+	var parsedBody any
+	if json.Unmarshal(body, &parsedBody) != nil {
+		parsedBody = string(body)
+	}
+
+	complete := map[string]any{
+		"method":  r.Method,
+		"path":    r.URL.Path,
+		"headers": headers,
+		"body":    parsedBody,
+	}
+
+	raw, err := json.Marshal(complete)
+	if err != nil {
+		slog.Error("failed to marshal complete request", "err", err)
+		return
+	}
+	fl.writeFile(prefix, "request", raw)
 }
 
 func (fl *FileLogger) writeExtracted(prefix string, parsed map[string]json.RawMessage, extractors []Extractor) {

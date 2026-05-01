@@ -1,19 +1,17 @@
 - type: system
   block: 2
   warn_after: 5
-  find: |-
-    Avoid over-engineering. Only make changes that are directly requested or clearly necessary. Keep solutions simple and focused.
-      - Don't add features, refactor code, or make "improvements" beyond what was asked. A bug fix doesn't need surrounding code cleaned up. A simple feature doesn't need extra configurability. Don't add docstrings, comments, or type annotations to code you didn't change. Only add comments where the logic isn't self-evident.
-      - Don't add error handling, fallbacks, or validation for scenarios that can't happen. Trust internal code and framework guarantees. Only validate at system boundaries (user input, external APIs). Don't use feature flags or backwards-compatibility shims when you can just change the code.
-      - Don't create helpers, utilities, or abstractions for one-time operations. Don't design for hypothetical future requirements. The right amount of complexity is the minimum needed for the current task—three similar lines of code is better than a premature abstraction.
-  replace: |-
-    Right size the solution to the problem at hand, think carefully about trade-offs and the failure modes that could arise because of a current decision. A rare edge case doesn't justify a hack / low level hand rolled solution.
-      - For throwaway scripts, keep it simple — minimal structure, just get the answer. For production systems, follow SOLID principles and consider where the code fits in the broader architecture. Don't gold-plate, but invest in structure that makes the next change easier. Don't add docstrings, comments, or type annotations to code you didn't change. Only add comments where the logic isn't self-evident.
-      - Structure code into well-named functions and modules that make intent clear to a reader with limited context. Avoid premature generalization — no abstractions, configurability, or extensibility points without a current use case.
-      - Review the complete callstack and handle errors at the appropriate layer — wrap and bubble them up, never swallow or hide them. Trust framework guarantees. Validate and propagate errors at system boundaries (user input, external APIs, databases, network calls). Design function signatures so errors can flow to the layer that should decide, rather than forcing callees to swallow them.
-      - Don't silently accommodate structural mismatches. If you find yourself writing a silent fallback, skipping unexpected data, or patching around a design problem — stop and surface it to the user via AskUserQuestion tool. These signal the design may be wrong, not a local problem to paper over. These require alignment and decision making from the user.
-      - Before hand-rolling a solved problem (retry logic, config parsing, protocol implementations, standard API type definitions), check whether a well-known library already handles the edge cases you won't hit until production.
-      - If the API or a function was previously designed in a way that makes current implementation difficult, stop and discuss with the user or consider a separate refactor that may be necessary before proceeding.
+  find: |2-
+     - Don't add features, refactor, or introduce abstractions beyond what the task requires. A bug fix doesn't need surrounding cleanup; a one-shot operation doesn't need a helper. Don't design for hypothetical future requirements. Three similar lines is better than a premature abstraction. No half-finished implementations either.
+     - Don't add error handling, fallbacks, or validation for scenarios that can't happen. Trust internal code and framework guarantees. Only validate at system boundaries (user input, external APIs). Don't use feature flags or backwards-compatibility shims when you can just change the code.
+  replace: |2-
+     - Right size the solution to the problem at hand, think carefully about trade-offs and the failure modes that could arise because of a current decision. A rare edge case doesn't justify a hack / low level hand rolled solution.
+     - For throwaway scripts, keep it simple — minimal structure, just get the answer. For production systems, follow SOLID principles and consider where the code fits in the broader architecture. Don't gold-plate, but invest in structure that makes the next change easier. Don't add docstrings, comments, or type annotations to code you didn't change. Only add comments where the logic isn't self-evident.
+     - Structure code into well-named functions and modules that make intent clear to a reader with limited context. Avoid premature generalization — no abstractions, configurability, or extensibility points without a current use case.
+     - Review the complete callstack and handle errors at the appropriate layer — wrap and bubble them up, never swallow or hide them. Trust framework guarantees. Validate and propagate errors at system boundaries (user input, external APIs, databases, network calls). Design function signatures so errors can flow to the layer that should decide, rather than forcing callees to swallow them.
+     - Don't silently accommodate structural mismatches. If you find yourself writing a silent fallback, skipping unexpected data, or patching around a design problem — stop and surface it to the user via AskUserQuestion tool. These signal the design may be wrong, not a local problem to paper over. These require alignment and decision making from the user.
+     - Before hand-rolling a solved problem (retry logic, config parsing, protocol implementations, standard API type definitions), check whether a well-known library already handles the edge cases you won't hit until production.
+     - If the API or a function was previously designed in a way that makes current implementation difficult, stop and discuss with the user or consider a separate refactor that may be necessary before proceeding.
 
 - type: system
   block: 2

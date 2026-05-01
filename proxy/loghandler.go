@@ -12,7 +12,7 @@ import (
 // with colorful output and kitchen time format.
 func SetupLogger() {
 	h := tint.NewHandler(os.Stderr, &tint.Options{
-		Level:      slog.LevelDebug,
+		Level:      slog.LevelInfo,
 		TimeFormat: time.Kitchen,
 	})
 	slog.SetDefault(slog.New(h))

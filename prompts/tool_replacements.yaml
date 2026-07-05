@@ -8,6 +8,11 @@
 #   regex:      Set to true to treat find as a regular expression
 #   disabled:   Set to true to skip this rule
 #   warn_after: Warn if this rule has matched 0 times after N evaluations (omit to never warn)
+#
+# The Bash tool description differs by model: Sonnet 4.6 and Haiku 4.5 ship the
+# verbose `gh pr create` / HEREDOC examples, Opus 4.8 a condensed `# Git` bullet list.
+
+# --- Sonnet 4.6 / Haiku 4.5 form ---
 
 - type: tool
   tool: Bash
@@ -28,14 +33,9 @@
   replace: |-
     <example>
     gh pr create --title "the pr title" --body "$(cat <<'EOF'
-    ## Problem
-    <Short description of the problem being solved>
-
-    ## Solution
-    <Short description of the solution implemented>
-
-    ## Context
-    <Any additional context, related bugs, or reasoning — omit if not needed>
+    - Structure PR bodies as:
+    <A short paragraph describing the problem being solved and the solution implemented, in 4-5 lines only>
+    <Don't add code references, details, etc. that the reader would find in the diff>
     EOF
     )"
     </example>
@@ -66,3 +66,24 @@
     <example>
     git commit -m '<component>: <lower case upto 70 character message here>'
     </example>
+
+# --- Opus 4.8 form ---
+
+# \S+ spans the 🤖 trailer emoji.
+- type: tool
+  tool: Bash
+  regex: true
+  warn_after: 5
+  find: "- End PR bodies with:\n\\S+ Generated with \\[Claude Code\\]\\(https://claude\\.com/claude-code\\)"
+  replace: |-
+    - Structure PR bodies as:
+    <A short paragraph describing the problem being solved and the solution implemented, in 4-5 lines only>
+    <Don't add code references, details, etc. that the reader would find in the diff>
+
+# .+ spans the per-model name in the trailer ("Opus 4.8 (1M context)", etc.).
+- type: tool
+  tool: Bash
+  regex: true
+  warn_after: 5
+  find: "- End git commit messages with:\nCo-Authored-By: Claude .+ <noreply@anthropic\\.com>"
+  replace: "- Format commit messages as: git commit -m '<component>: <lower case up to 70 character message here>'"

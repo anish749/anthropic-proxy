@@ -1,12 +1,7 @@
-# Claude Code 2.1.200 compressed block 2 into terse principles, deleting the
-# enumerated do/don't lists these rules used to edit. So instead of replacing
-# old text, each rule now ANCHORS on a live sentence and appends our guidance
-# after it (replace = anchor sentence + injected content). Anchors are shared,
-# so related injections are consolidated into one rule per anchor.
+# Updated for Claude Code 2.1.200: rules anchor on surviving sentences
+# and append guidance after them.
 
-# --- Code guidance (anchor: the "write code that reads like the surrounding
-# code" sentence). Drops the "match its comment density" clause, then appends
-# comment discipline, right-sizing, and file-creation guidance. ---
+# Code guidance: comment discipline, right-sizing, file-creation.
 - type: system
   block: 2
   warn_after: 5
@@ -23,9 +18,7 @@
      - If the API or a function was previously designed in a way that makes current implementation difficult, stop and discuss with the user or consider a separate refactor that may be necessary before proceeding.
      - Prefer editing existing files to creating new ones, unless the new code doesn't logically fit the file or would push it past a reasonable size.
 
-# --- Investigation (anchor: the "When you have enough information to act"
-# paragraph). Appends investigate-before-answering and exploratory-question
-# guidance. NOTE: this anchor has no trailing period in the base prompt. ---
+# Investigation: investigate-before-answering, exploratory-question guidance.
 - type: system
   block: 2
   warn_after: 5
@@ -40,10 +33,7 @@
      - Before changing a function signature or renaming a widely-used symbol, read its call sites.
      - For multi-file or cross-module changes, plan the edits first: list the files, the order, and the contracts between them.
 
-# --- End-of-turn discipline (anchor: the "Report outcomes faithfully"
-# sentence). Appends the four former end-of-turn rules. Culprits 1-2 kept as
-# written; the drop-details and turn-ending rules were surgical edits of now-
-# deleted sentences, rewritten here as standalone instructions. ---
+# End-of-turn discipline: concise responses, no unsolicited offers.
 - type: system
   block: 2
   warn_after: 5

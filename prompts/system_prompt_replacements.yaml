@@ -34,10 +34,13 @@
      - Before changing a function signature or renaming a widely-used symbol, read its call sites.
      - For multi-file or cross-module changes, plan the edits first: list the files, the order, and the contracts between them.
 
-- type: system
-  block: 2
-  find: " - Only use emojis if the user explicitly requests it. Avoid using emojis in all communication unless asked.\n"
-  replace: ""
+# Emoji rule removed upstream: the base prompt no longer ships
+# "Only use emojis if the user explicitly requests it…" as of Claude Code
+# 2.1.200.390 (it was present at 2.1.114), so this deletion is a no-op.
+# - type: system
+#   block: 2
+#   find: " - Only use emojis if the user explicitly requests it. Avoid using emojis in all communication unless asked.\n"
+#   replace: ""
 
 # --- End-of-turn caveat/offer reflex (three targeted edits + checklist hook) ---
 

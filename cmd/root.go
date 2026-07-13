@@ -59,6 +59,8 @@ func Execute(version string) {
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
+	fmt.Printf("anthropic-proxy %s\n", cmd.Version)
+
 	addr := fmt.Sprintf(":%d", port)
 	p := proxy.New(proxy.Options{
 		LogRequests: logReqs,

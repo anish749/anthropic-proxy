@@ -168,9 +168,12 @@ func loadRules(dir string) (*rewriterState, error) {
 		slog.Info("rewriter: loaded full replacement", "block", i, "path", path)
 	}
 
-	// Load all *.yaml files from the directory
+	// Load all *.yaml files from the directory (skip non-rule configs)
 	files, _ := filepath.Glob(filepath.Join(dir, "*.yaml"))
 	for _, path := range files {
+		if filepath.Base(path) == betaFlagFile {
+			continue
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue

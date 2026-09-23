@@ -1,0 +1,22 @@
+# System-reminder find-and-replace rules.
+#
+# Rules apply to the text inside every <system-reminder>...</system-reminder>
+# block found in user messages. If a reminder's content is empty after all
+# rules run, the whole block (tags included) is removed from the message.
+#
+# Fields:
+#   type:       "system-reminder"
+#   find:       Text to find inside the reminder
+#   replace:    Text to replace it with (use "" to delete)
+#   regex:      Set to true to treat find as a regular expression
+#   disabled:   Set to true to skip this rule
+#   warn_after: Warn if this rule has matched 0 times after N evaluations (omit to never warn)
+
+# Drop the attribution reminder that asks for Co-Authored-By trailers on
+# commits and a "Generated with Claude Code" line on PR descriptions. The
+# model name in the trailer varies (Fable 5.1, Opus 4.8, ...), so match with
+# a regex from the opening sentence through the PR line.
+- type: system-reminder
+  regex: true
+  find: '(?s)Attribution for git commits and pull requests you create from here on.*?Generated with \[Claude Code\]\(https://claude\.com/claude-code\)'
+  replace: ""

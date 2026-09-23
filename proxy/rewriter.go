@@ -491,6 +491,7 @@ func (rw *Rewriter) rewriteReminders(s *rewriterState, msgsRaw json.RawMessage, 
 		}
 
 		contentModified := false
+		emptied := map[int]bool{}
 		for j, block := range blocks {
 			typeRaw, ok := block["type"]
 			if !ok {
@@ -555,10 +556,26 @@ func (rw *Rewriter) rewriteReminders(s *rewriterState, msgsRaw json.RawMessage, 
 				}
 				blocks[j]["text"] = newTextJSON
 				contentModified = true
+				if strings.TrimSpace(newText) == "" {
+					emptied[j] = true
+				}
 			}
 		}
 
 		if contentModified {
+			// Drop text blocks that became empty when their only reminder was
+			// removed: the API rejects whitespace-only text blocks. Keep at
+			// least one block so the message itself stays valid.
+			if len(emptied) > 0 && len(emptied) < len(blocks) {
+				kept := make([]map[string]json.RawMessage, 0, len(blocks)-len(emptied))
+				for j, block := range blocks {
+					if !emptied[j] {
+						kept = append(kept, block)
+					}
+				}
+				blocks = kept
+			}
+
 			newContent, err := json.Marshal(blocks)
 			if err != nil {
 				continue

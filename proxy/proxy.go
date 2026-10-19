@@ -21,10 +21,11 @@ const (
 )
 
 type Proxy struct {
-	client   *http.Client
+	client     *http.Client
 	fileLogger *FileLogger
 	logLevel   RequestLogLevel
 	rewriter   *Rewriter
+	betaFlags  *BetaFlagRewriter
 	credSwap   *CredSwapper
 }
 
@@ -40,8 +41,9 @@ func New(opts Options) *Proxy {
 		logLevel = LogAll
 	}
 	p := &Proxy{
-		client:   &http.Client{},
-		rewriter: NewRewriter("prompts"),
+		client:    &http.Client{},
+		rewriter:  NewRewriter("prompts"),
+		betaFlags: NewBetaFlagRewriter("prompts"),
 		fileLogger: NewFileLogger("requests", opts.LogFormat,
 			[]Extractor{ToolsExtractor{}, MessagesExtractor{}, SystemExtractor{}, SystemRemindersExtractor{}},
 			[]Extractor{UsageExtractor{}},
@@ -62,6 +64,7 @@ func New(opts Options) *Proxy {
 // WatchPrompts starts hot-reloading of prompt files in the background.
 func (p *Proxy) WatchPrompts() {
 	p.rewriter.Watch()
+	p.betaFlags.Watch()
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -98,6 +101,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			outReq.Header.Add(key, val)
 		}
 	}
+
+	// Remove disabled beta flags
+	p.betaFlags.Rewrite(outReq)
 
 	// Swap credentials if enabled
 	if p.credSwap != nil {

@@ -13,7 +13,7 @@ import (
 
 var (
 	port      int
-	logReqs   bool
+	logLevel  string
 	swapCreds bool
 	logFormat string
 )
@@ -37,7 +37,8 @@ Run without a subcommand to start the proxy server.`,
 	}
 
 	root.Flags().IntVar(&port, "port", 8080, "port to listen on")
-	root.Flags().BoolVar(&logReqs, "log", false, "log requests to the requests/ directory")
+	root.Flags().StringVar(&logLevel, "log", "off", "log requests to the requests/ directory: off, warnings (only requests with rewrite warnings), or all; bare --log means all")
+	root.Flags().Lookup("log").NoOptDefVal = "all"
 	root.Flags().BoolVar(&swapCreds, "swap-creds", false, "replace client credentials with logged-in OAuth token")
 	root.Flags().StringVar(&logFormat, "log-format", "yaml", "output format for logged requests (json, yaml)")
 
@@ -61,16 +62,24 @@ func Execute(version string) {
 func runServe(cmd *cobra.Command, args []string) error {
 	fmt.Printf("anthropic-proxy %s\n", cmd.Version)
 
+	level, err := proxy.ParseRequestLogLevel(logLevel)
+	if err != nil {
+		return err
+	}
+
 	addr := fmt.Sprintf(":%d", port)
 	p := proxy.New(proxy.Options{
-		LogRequests: logReqs,
-		SwapCreds:   swapCreds,
-		LogFormat:   logFormat,
+		LogLevel:  level,
+		SwapCreds: swapCreds,
+		LogFormat: logFormat,
 	})
 	p.WatchPrompts()
 
 	slog.Info("anthropic-proxy listening", "addr", "http://localhost"+addr)
 	slog.Info("forwarding to https://api.anthropic.com")
+	if level != proxy.LogOff {
+		slog.Info("request logging: ENABLED", "level", level, "dir", "requests/")
+	}
 	if swapCreds {
 		slog.Info("credential swap: ENABLED (using logged-in OAuth token)")
 	}

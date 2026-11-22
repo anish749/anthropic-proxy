@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,14 +15,40 @@ const targetBase = "https://api.anthropic.com"
 type RequestLogLevel int
 
 const (
+	// LogOff never logs requests to disk.
+	LogOff RequestLogLevel = iota
 	// LogOnWarnings logs requests only when rewrite rules produce warnings.
-	LogOnWarnings RequestLogLevel = iota
+	LogOnWarnings
 	// LogAll logs every request.
 	LogAll
 )
 
+// ParseRequestLogLevel parses a level name: "off", "warnings", or "all".
+func ParseRequestLogLevel(s string) (RequestLogLevel, error) {
+	switch s {
+	case "off":
+		return LogOff, nil
+	case "warnings":
+		return LogOnWarnings, nil
+	case "all":
+		return LogAll, nil
+	}
+	return LogOff, fmt.Errorf("invalid log level %q (want off, warnings, or all)", s)
+}
+
+func (l RequestLogLevel) String() string {
+	switch l {
+	case LogOnWarnings:
+		return "warnings"
+	case LogAll:
+		return "all"
+	default:
+		return "off"
+	}
+}
+
 type Proxy struct {
-	client   *http.Client
+	client     *http.Client
 	fileLogger *FileLogger
 	logLevel   RequestLogLevel
 	rewriter   *Rewriter
@@ -29,16 +56,12 @@ type Proxy struct {
 }
 
 type Options struct {
-	LogRequests bool
-	SwapCreds   bool
-	LogFormat   string // "json" or "yaml"
+	LogLevel  RequestLogLevel
+	SwapCreds bool
+	LogFormat string // "json" or "yaml"
 }
 
 func New(opts Options) *Proxy {
-	logLevel := LogOnWarnings
-	if opts.LogRequests {
-		logLevel = LogAll
-	}
 	p := &Proxy{
 		client:   &http.Client{},
 		rewriter: NewRewriter("prompts"),
@@ -46,7 +69,7 @@ func New(opts Options) *Proxy {
 			[]Extractor{ToolsExtractor{}, MessagesExtractor{}, SystemExtractor{}, SystemRemindersExtractor{}},
 			[]Extractor{UsageExtractor{}},
 		),
-		logLevel: logLevel,
+		logLevel: opts.LogLevel,
 	}
 	if opts.SwapCreds {
 		cs, err := NewCredSwapper()
@@ -128,11 +151,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	reqID := resp.Header.Get("Request-Id")
 	warnings.Flush(reqID)
 
-	// Log request parts to files for Anthropic Messages API calls:
-	// always when LogAll, or on-demand when there are rewrite warnings.
-	shouldLog := r.Method == http.MethodPost && r.URL.Path == "/v1/messages" &&
-		(p.logLevel >= LogAll || warnings.HasWarnings())
-	if shouldLog {
+	// Log request parts to files for Anthropic Messages API calls,
+	// depending on the configured level.
+	if p.shouldLog(r, warnings) {
 		if reqID != "" {
 			p.fileLogger.Log(reqID, r, reqBody, rewrittenBody, respBody)
 		} else {
@@ -148,4 +169,19 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(resp.StatusCode)
 	w.Write(respBody)
+}
+
+// shouldLog reports whether a request should be written to disk.
+func (p *Proxy) shouldLog(r *http.Request, warnings *Warnings) bool {
+	if r.Method != http.MethodPost || r.URL.Path != "/v1/messages" {
+		return false
+	}
+	switch p.logLevel {
+	case LogAll:
+		return true
+	case LogOnWarnings:
+		return warnings.HasWarnings()
+	default:
+		return false
+	}
 }

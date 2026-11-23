@@ -48,7 +48,7 @@ Run `anthropic-proxy --help` or `anthropic-proxy <command> --help` for details.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--port` | `8080` | Port to listen on |
-| `--log` | `false` | Log every request to the `requests/` directory |
+| `--log` | `off` | Log requests to the `requests/` directory: `off`, `warnings`, or `all` (bare `--log` means `all`) |
 | `--log-format` | `json` | Output format for logged requests (`json`, `yaml`) |
 | `--swap-creds` | `false` | Replace client credentials with logged-in OAuth token |
 ## Rewriting rules
@@ -122,11 +122,14 @@ Unmatched find strings log a warning correlated with the upstream `Request-Id`. 
 
 ## Request logging
 
-Opt-in with the `--log` flag:
+Off by default. Opt in with the `--log` flag:
 
 ```sh
-anthropic-proxy --port 8080 --log
+anthropic-proxy --log            # log every request (same as --log=all)
+anthropic-proxy --log=warnings   # log only requests whose rewrite rules produced warnings
 ```
+
+Pass a level with `=` (`--log=warnings`). With a space, `--log warnings` fails with `unknown command "warnings"`.
 
 Each API call creates files in `requests/` named `{timestamp}-{request-id}-{model}-{part}.json`:
 
@@ -135,8 +138,6 @@ Each API call creates files in `requests/` named `{timestamp}-{request-id}-{mode
 - `system.json` — system prompt
 - `system-reminders.json` — `<system-reminder>` blocks extracted from user messages (if any)
 - `usage.json` — token usage from the response
-
-Without `--log`, requests are still logged automatically when rewrite rules produce warnings, for debugging.
 
 ## OAuth login
 
